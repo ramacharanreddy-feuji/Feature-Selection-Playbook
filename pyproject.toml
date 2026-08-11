@@ -1,0 +1,111 @@
+[project]
+name = "feature-selection-playbook"
+version = "0.0.1"
+description = "A screening tool that understands rows and columns, then hands a data scientist a ranked, reasoned feature shortlist with an audit trail."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "Proprietary" }
+authors = [{ name = "Ramacharan R", email = "ramacharan.r@feuji.com" }]
+keywords = [
+    "feature-selection",
+    "eda",
+    "data-understanding",
+    "leakage-detection",
+    "all-relevant",
+]
+
+# ---------------------------------------------------------------------------
+# Core dependencies. The two dependency-heavy / tightly-pinned helpers
+# (profilers, Boruta) live in optional extras below to keep the core solve
+# clean.
+# ---------------------------------------------------------------------------
+dependencies = [
+    # Data + artifact layer
+    "pandas>=2.3.3",
+    "numpy>=2.3.5",
+    "pyarrow>=25.0.1",
+
+    # Statistics
+    "scipy>=1.16.3",           # Spearman, Kendall tau, chi-square / Cramer's V, Cliff's delta
+    "scikit-learn>=1.9.0",     # cross-validation folds, AUC, RandomForest
+    "statsmodels>=0.14.6",     # FDR (BH q-values), VIF, logistic c-stat, ordinal helpers
+
+    # Information Value / WoE / x-statistic optimal binning
+    "optbinning>=0.21.0",
+
+    # Survival: Cox screening + C-index
+    "lifelines>=0.30.3",
+
+    # Figures + sidecars
+    "matplotlib>=3.10.0",
+
+    # Readable table output
+    "rich>=15.0.0",
+
+    # Config
+    "pyyaml>=6.0.3",
+]
+
+# ---------------------------------------------------------------------------
+# Optional extras. Isolated because their transitive pins are strict enough to
+# constrain the whole solve, and each is only needed for one stage.
+# ---------------------------------------------------------------------------
+[project.optional-dependencies]
+# Wrap existing automated profiling instead of rebuilding it.
+profiling = [
+    "ydata-profiling>=4.18.4",
+    "sweetviz>=2.3.3",
+]
+
+# All-relevant cross-check.
+boruta = [
+    "Boruta>=0.4.3",
+]
+
+# Everything, for a full local install.
+all = [
+    "feature-selection-playbook[profiling,boruta]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.2",
+    "mypy>=2.3.0",
+    "ipykernel>=7.3.0",
+]
+
+# ---------------------------------------------------------------------------
+# Build backend
+# ---------------------------------------------------------------------------
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dsp"]
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["dsp"]
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
