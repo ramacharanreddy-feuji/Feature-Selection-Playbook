@@ -16,6 +16,8 @@ Given a path to a dataset (CSV/parquet/Excel/SPSS·SAS·Stata) and — if the us
 ## Non-negotiables (from `PLAYBOOK.md`)
 - **Use the exact thresholds (§9) and formulas (§17) via `fsp`** (`fsp.thresholds`, `fsp.metrics`). If the guide doesn't specify how to measure something, **STOP and ask** — do not invent a method. If `fsp` lacks a deterministic tool you need, **stop and say so** — don't hand-roll it.
 - **No per-feature target statistic before the fold split exists (Part E)** — the most-violated rule (§4.4 edge 3). `fsp`'s relevance tools enforce this; do not bypass them.
+- **Never mark `leak-suspect` from a single effect threshold** — corroborate (§12.3): a strong structural signal, or ≥2 detectors. Use `leakage.adjudicate`; don't hand-roll "flag every high effect" (it floods on predictable data).
+- **Run the parts live and incrementally — never batch-write the whole A→H run.** Execute each part's tools, read the output, decide from what you see, document the section (facts + tables/figures), pass the gate, *then* proceed (§1, §3.1). Don't skip a step or thin its documentation because you think you know the data.
 - **Every dropped column stays in the ledger** with its numbers. `drop` ≠ delete.
 - **Part A (Frame) is the mandatory human checkpoint.** State inferences as corrigible claims; confirm target and grain with the user before proceeding.
 - **A failing gate is a hard stop** — report which exit condition failed and why (§15); don't guess past it.

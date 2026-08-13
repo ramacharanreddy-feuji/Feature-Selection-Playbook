@@ -22,15 +22,15 @@ def crosscheck(
     Numeric features pass through; categoricals are ordinal-encoded (factorized)
     so surviving **and** dropped categoricals are cross-checked too, not skipped.
     """
-    x = pd.DataFrame(index=df.index)
-    for feat in features:
-        col = df[feat]
-        if pd.api.types.is_numeric_dtype(col):
-            x[feat] = col.astype(float)
-        else:
-            x[feat] = pd.factorize(col)[0].astype(float)  # NaN → -1, its own level
-    if x.shape[1] == 0:
+    # Build all columns at once (avoid per-insert DataFrame fragmentation on wide data).
+    encoded = {
+        feat: (df[feat].astype(float) if pd.api.types.is_numeric_dtype(df[feat])
+               else pd.Series(pd.factorize(df[feat])[0], index=df.index).astype(float))
+        for feat in features
+    }
+    if not encoded:
         return {}
+    x = pd.DataFrame(encoded, index=df.index)
     x = x.fillna(x.median(numeric_only=True))
     y = df[target]
     mask = y.notna().to_numpy()

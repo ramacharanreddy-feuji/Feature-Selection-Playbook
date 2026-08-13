@@ -28,6 +28,7 @@ Corollary rules:
 - **Use `fsp` for §9 numbers and §17 formulas** (`fsp.thresholds`, `fsp.metrics`). Do not hardcode a threshold or re-implement (or roughly approximate) a metric `fsp` already computes.
 - **No per-feature target-association statistic before the folds exist (Part E).** Only Part B's aggregate viability facts and Part D's missingness-leak diagnostic may touch the target earlier. See §4.4 edge 3 — the most-violated, least-noticed rule.
 - **Every drop stays in the ledger.** `drop` means "excluded from the first model," never "deleted."
+- **Run every part in order, live and complete — never skip a step or thin its documentation because you think you already know the data.** Execute a part's tools, **read the actual output**, decide *from what you see*, document it with the facts/tables/figures behind it, and pass the gate — *then* move to the next part. Do **not** batch-write the whole A→H run blind: you cannot choose a semantic type before you've seen the inventory, or a verdict before you've seen the effect. Your inferences are corrigible claims, not shortcuts. A pre-written end-to-end script is not running the playbook; it is guessing it.
 
 ---
 
@@ -70,8 +71,9 @@ Every part is the **same four steps.** This is the core of how you work:
 | **3. Document** | Append a written section to the live notebook — your prose plus the tables and figures behind it. | `fsp.notebook`, `fsp.report` |
 | **4. Verify** | Check the part's **gate conditions** (§7). If any fails, **stop** and report — do not proceed. | `fsp.gate` |
 
-Two habits that make this trustworthy:
-- **Document as you go, not at the end.** The notebook is written incrementally so a human can watch the analysis unfold and audit each step.
+Three habits that make this trustworthy:
+- **Run it live, not blind.** Execute each part and **read its output before writing the next** — the type / sentinel / verdict decisions depend on what the previous step actually returned. Work one part at a time; never pre-write the whole run.
+- **Document as you go, not at the end.** The notebook is written incrementally so a human can watch the analysis unfold and audit each step. Each section carries the part's facts **plus the tables and figures behind the decision** — a one-line section is not a documented part.
 - **When in doubt, keep and flag.** The cost asymmetry (§4.2) means a wrongly-dropped feature is a silent, permanent loss; a wrongly-kept one costs a reviewer four seconds.
 
 ---
@@ -99,7 +101,7 @@ For every feature, compare its effect against the effect achievable at random �
 4. **F before G.** Representative selection needs effect sizes.
 
 ### 4.5 Gates are self-checks, not suggestions
-Each part ends with explicit **exit conditions** (§7). Before you move on, verify them with `fsp.gate` and state the result in the notebook. If a condition fails, **stop the run and report which one and why** (§15). "Do not proceed without X" is a hard stop you enforce on yourself — not a soft guideline.
+Each part ends with explicit **exit conditions** (§7). Before you move on, verify them with `fsp.gate` and state the result in the notebook. If a condition fails, **stop the run and report which one and why** (§15). "Do not proceed without X" is a hard stop you enforce on yourself — not a soft guideline. A gate is **not passed until the part's documented section is written** — its facts plus the tables/figures behind the decisions (§14). A bare verdict with no documentation does not count as done; ran-every-tool-and-documented-it is part of the exit condition, not an afterthought.
 
 ### 4.6 Outputs — what every part leaves behind
 - **A notebook section** (§14): prose + the tables and figures behind your decisions, appended live.
@@ -212,7 +214,7 @@ Each part follows the §3.1 loop. Below, per part: what to **compute**, what to 
 ### Part H — Verdict  *(assemble)*
 - **Purpose:** what we hand over, and why.
 - **Compute:** the accumulated leak register (§12); the Boruta cross-check (§16) — fit Boruta on surviving **and** dropped features.
-- **Decide & record:** adjudicate each leak signal once, as a batch → `leak-suspect` (with detector + type); re-flag anything Boruta confirms that you dropped → `review`; give **every** column its final verdict + a non-empty reason. Log the drop-rate per rule (§9.3).
+- **Decide & record:** adjudicate the register once, **corroborated** (§12.3) → `leak-suspect` (with detector + type); re-flag anything Boruta confirms that you dropped → `review`; give **every** column its final verdict + a non-empty reason. Log the drop-rate per rule (§9.3).
 - **Document:** the closing section (§14.1).
 - **Gate `H`:** every column has exactly one verdict and a non-empty reason; leak register fully adjudicated; drop-rate per rule logged.
 
@@ -361,6 +363,11 @@ Detectors need inputs from different stages, so leakage **accumulates across par
 The **prediction-time reference** for the future-timestamp check comes from Part A (`reference_date`); absent one, `date_col` is used as a weaker proxy — but event-time ≠ prediction-time (§7 A), so treat those hits as lower-confidence.
 
 **Outlier-based detection is primary; fixed thresholds are backstops.** Where the best honest feature reaches 0.62, an 0.80 is glaring; where several legitimately reach 0.82, it isn't. (Modern practice agrees: a feature with absurdly high importance relative to its peers is the first sign of a label proxy.)
+
+### 12.3 Adjudication needs corroboration
+A **single weak signal is not a leak.** The effect-based detectors — *effect above the fixed backstop*, *outlier-vs-peers*, *missingness-predicts-target* — fire on legitimately strong features whenever the problem is **well-separated** (many honest features clear AUC 0.85) or **missingness is genuinely informative**; a lone one drowns the real leak in false positives. Promote a column to `leak-suspect` **only** when a **strong structural signal** fires — target-like **name**, **future timestamp**, **perfect separation**, **value-only-for-positives** — **or** **≥ 2 distinct detectors agree**. Everything else is *reported* (kept in the register, shown in the ledger's `leak_flag`) and left for the human. `fsp.parts.leakage.adjudicate` enforces this; do not hand-roll a "flag every high effect" rule (that is the most common orchestration mistake).
+
+**Corollary — the honest limit:** on a genuinely predictable problem, **effect size cannot distinguish a leak from a strong feature** (a target proxy at AUC 0.98 sits among honest sensors at 0.95). There, only the **structural/temporal** signals discriminate; a leak with an innocent name and no temporal/missingness tell **will not be caught** — say so in the notebook rather than implying the effect thresholds found everything.
 
 ---
 

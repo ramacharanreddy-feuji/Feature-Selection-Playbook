@@ -123,6 +123,19 @@ def test_leakage_detectors(data, tmp_path):
     assert "leak_score" in adj
 
 
+def test_adjudicate_requires_corroboration(data, tmp_path):
+    ctx = fsp.open_run(data, target="churn", target_type="binary", runs_dir=tmp_path / "runs")
+    # A lone WEAK signal (effect-above-backstop only) must NOT be adjudicated.
+    leakage.backstop_effects(ctx, {"noise": 0.99}, threshold=0.85)
+    assert "noise" not in leakage.adjudicate(ctx)
+    # A strong structural signal (target-like name) stands alone.
+    leakage.name_signals(ctx)  # fires on 'leak_score'
+    assert "leak_score" in leakage.adjudicate(ctx)
+    # Two distinct weak signals on one column corroborate.
+    leakage.outlier_effects(ctx, {"noise": 0.99, "a": 0.5, "b": 0.5, "c": 0.5, "d": 0.5, "e": 0.5})
+    assert "noise" in leakage.adjudicate(ctx)  # backstop + outlier → 2 detectors
+
+
 def test_only_present_for_positives_fires(data, tmp_path):
     d = data.copy()
     y = d["churn"].to_numpy()

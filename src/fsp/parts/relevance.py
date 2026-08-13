@@ -75,10 +75,15 @@ def _screening_rows(ctx: RunContext) -> np.ndarray:
     return np.unique(np.concatenate([tr for tr, _ in ctx.folds.splits]))
 
 
-def relevance(ctx: RunContext, feature: str, feature_type: str) -> dict[str, Any]:
+def relevance(
+    ctx: RunContext, feature: str, feature_type: str, *, ci_b: int = 200, shadow_b: int = 50
+) -> dict[str, Any]:
     """Effect + CI + q + shape gap + fold spread + shadow floor for one feature.
     The point estimate is on all rows once the split is frozen; the per-fold test
-    effects give the stability spread. Raises if folds are not frozen (§4.4)."""
+    effects give the stability spread. Raises if folds are not frozen (§4.4).
+
+    `ci_b` / `shadow_b` are the bootstrap-CI and shadow-permutation counts — lower
+    them (or `ci_b=0` to skip the CI) to speed up screening on very wide data."""
     if ctx.folds is None:
         raise GateFailure("relevance", ["folds not frozen (Part E) — cannot touch the target"])
     target = ctx.config.target
@@ -107,8 +112,9 @@ def relevance(ctx: RunContext, feature: str, feature_type: str) -> dict[str, Any
     fold_spread = float(np.nanstd(per_fold)) if per_fold else float("nan")
 
     xa, ya = x_all.to_numpy(), y_all.to_numpy()
-    ci = metrics.bootstrap_ci(fn, xa, ya, b=200, seed=ctx.config.seed)
-    samples = metrics.shadow_samples(fn, xa, ya, b=50, seed=ctx.config.seed)
+    ci = (metrics.bootstrap_ci(fn, xa, ya, b=ci_b, seed=ctx.config.seed)
+          if ci_b > 0 else (float("nan"), float("nan")))
+    samples = metrics.shadow_samples(fn, xa, ya, b=shadow_b, seed=ctx.config.seed)
     floor = float(np.nanpercentile(samples, SHADOW_PCT))
     # Analytic p where the metric has one; else a permutation p off the same
     # shadow samples, so AUC/IV/η²/Cramér's V all get a q-value (§17.6).
@@ -212,18 +218,24 @@ def _survival(ctx: RunContext, feature: str) -> dict[str, Any]:
     }
 
 
-def relevance_all(ctx: RunContext, features: dict[str, str], *, n_jobs: int = 1) -> pd.DataFrame:
+def relevance_all(
+    ctx: RunContext, features: dict[str, str], *,
+    n_jobs: int = 1, ci_b: int = 200, shadow_b: int = 50,
+) -> pd.DataFrame:
     """Run `relevance` over {feature: feature_type}, then add BH-FDR q-values.
 
-    `n_jobs` fans the per-feature work out over joblib (§11 decision); the
-    default (1) stays sequential and deterministic on small frames."""
+    `n_jobs` fans the per-feature work out over joblib (§11 decision); the default
+    (1) stays sequential and deterministic. `ci_b`/`shadow_b` tune the per-feature
+    resampling cost for wide data (see `relevance`)."""
     items = list(features.items())
     if n_jobs == 1:
-        rows = [relevance(ctx, feat, ftype) for feat, ftype in items]
+        rows = [relevance(ctx, feat, ftype, ci_b=ci_b, shadow_b=shadow_b) for feat, ftype in items]
     else:
         from joblib import Parallel, delayed
 
-        rows = Parallel(n_jobs=n_jobs)(delayed(relevance)(ctx, f, t) for f, t in items)
+        rows = Parallel(n_jobs=n_jobs)(
+            delayed(relevance)(ctx, f, t, ci_b=ci_b, shadow_b=shadow_b) for f, t in items
+        )
     df = pd.DataFrame(rows)
     if "p" in df.columns:
         df["q_value"] = metrics.bh_fdr(df["p"].to_numpy())

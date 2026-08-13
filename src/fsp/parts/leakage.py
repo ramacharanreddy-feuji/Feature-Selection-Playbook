@@ -147,13 +147,32 @@ def missingness_signals(ctx: RunContext, *, threshold: float = 0.70) -> None:
             )
 
 
+# Structural/direct signals reliable enough to stand alone. The rest —
+# effect-above-backstop, outlier-vs-peers, missingness-predicts-target — are *weak*
+# on a well-separated problem (many honest features clear the bar, or missingness is
+# genuinely informative), so a lone one of them needs corroboration (§12.3).
+_STRONG_DETECTORS = frozenset(
+    {"target-like-name", "future-timestamp", "perfect-separation", "present-only-for-one-class"}
+)
+
+
 def adjudicate(ctx: RunContext) -> dict[str, str]:
-    """Resolve the whole register once (§12): {column: "detector:type"}."""
+    """Resolve the register once (§12.3) → {column: "detector:type"}, **corroborated**:
+    a column is adjudicated as a leak-suspect only when a strong structural signal
+    fires (target-like name / future timestamp / perfect separation / present-only-for-
+    positives) **or** ≥2 distinct detectors agree. A lone weak signal is left in the
+    register (still visible in the ledger's `leak_flag`) but not adjudicated — on a
+    predictable problem those fire on legitimate strong features and drown the real leak."""
     sigs = ctx.leaks.signals()
     if sigs.empty:
         return {}
     out: dict[str, str] = {}
     for col, grp in sigs.groupby("column"):
-        first = grp.iloc[0]
-        out[str(col)] = f"{first['detector']}:{first['ltype']}"
+        detectors = list(dict.fromkeys(grp["detector"]))
+        strong = [d for d in detectors if d in _STRONG_DETECTORS]
+        if not strong and len(detectors) < 2:
+            continue  # single weak signal → reported only, not adjudicated
+        lead = grp[grp["detector"] == (strong[0] if strong else detectors[0])].iloc[0]
+        extra = f" (+{len(detectors) - 1})" if len(detectors) > 1 else ""
+        out[str(col)] = f"{lead['detector']}:{lead['ltype']}{extra}"
     return out

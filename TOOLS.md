@@ -131,7 +131,7 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 
 **`partition.py` (E)** · `suggest_strategy(*, has_repeating_id, has_date) -> str` · `recommended_k(tier) -> int` · `make_folds(df, strategy, k=5, *, seed=42, target=None, group=None, date=None, run_dir=None) -> Folds` · `load_folds(run_dir) -> Folds`.
 
-**`relevance.py` (F)** · `derive_datetime(s, *, reference=None) -> DataFrame` (calendar + cyclical + recency) · `hurdle_split(count) -> (is_zero, positives)` · `relevance(ctx, feature, ftype) -> dict` ⛨ · `relevance_all(ctx, features, *, n_jobs=1) -> DataFrame` ⛨ (adds `q_value`). See §4 for the `relevance` return shape.
+**`relevance.py` (F)** · `derive_datetime(s, *, reference=None) -> DataFrame` (calendar + cyclical + recency) · `hurdle_split(count) -> (is_zero, positives)` · `relevance(ctx, feature, ftype, *, ci_b=200, shadow_b=50) -> dict` ⛨ · `relevance_all(ctx, features, *, n_jobs=1, ci_b=200, shadow_b=50) -> DataFrame` ⛨ (adds `q_value`; lower `ci_b`/`shadow_b`, or `ci_b=0`, for wide-data speed). See §4 for the `relevance` return shape.
 
 **`redundancy.py` (G)** · `pairwise(df, features, types) -> DataFrame` ([0,1], typed) · `components(pairs, threshold=0.95) -> list[set]` · `representative(component, effects, missing) -> str` · `vif` (re-export).
 
@@ -147,6 +147,8 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 | `backstop_effects` | `backstop_effects(ctx, effects, *, threshold)` | F | direct |
 | `separation_signals` | `separation_signals(ctx, features, *, min_count=5)` | F | direct |
 | `adjudicate` | `adjudicate(ctx) -> dict[col, "detector:type"]` | H | — |
+
+`adjudicate` is **corroborated** (§12.3): it returns a column as a leak-suspect only when a strong structural signal fires (name / future-timestamp / perfect-separation / present-only-for-positives) **or** ≥ 2 distinct detectors agree — a lone weak effect signal stays in the register but is not adjudicated. Don't build a "flag every effect ≥ threshold" rule around `backstop_effects`; that floods on predictable data (§12.3). Part-F resampling dominates cost on wide data — pass `relevance_all(..., ci_b=…, shadow_b=…)` (or `ci_b=0`) to trade CI precision for speed.
 
 **`boruta.py` (H)** · `crosscheck(df, features, target, target_type, *, seed=42, max_iter=40) -> dict[col, "confirmed"|"tentative"|"rejected"]` (numeric + factorized categoricals).
 
@@ -181,9 +183,9 @@ Claude fills the remaining ledger fields by decision: `semantic_type` (C), `verd
 
 ---
 
-## 5. Typical run skeleton (A → H)
+## 5. Call-order reference (A → H) — run incrementally, **not** as a script
 
-The call order for one screening. Claude writes the prose, decisions, and notebook narrative around it; the tools supply the deterministic facts.
+This is the sequence of tools each part calls — a **reference, not a script to paste and run blind.** Per playbook §1 / §3.1 you run this **one part at a time**: call a part's tools, **read the output**, decide *from what you see*, document the section (facts + tables/figures), pass the gate, *then* move to the next part. The block below is compressed to show the order; a faithful run is incremental and inspects each part before writing the next — a semantic type can't be chosen before the inventory is seen, nor a verdict before the effect. (Corroboration at H is handled by `leakage.adjudicate`, §12.3 — don't wrap `backstop_effects` in a "flag every high effect" rule.)
 
 ```python
 import fsp
@@ -217,6 +219,11 @@ for col in ctx.df.columns:
         ctx.ledger.upsert(col, semantic_type=stype)
         feature_types[col] = stype                          # non-structural → testable in F
 leakage.name_signals(ctx)
+# Document the part, THEN gate — EVERY part A–H does this (facts + the tables/figures
+# behind the decision, §14); a bare gate with no documented section does not pass (§4.5):
+ctx.notebook.add_section("C · Inventory", body="…what the profile showed & why…",
+                         tables=[("Profile", fsp.report.tables.inventory_table(inventory.profile(ctx.df)))])
+ctx.gate("C", {"every_column_typed": True})
 
 # D · Value integrity — sentinels, missingness, co-missing; D leak detectors
 values.sentinel_candidates(ctx.df); values.comissing_clusters(ctx.df)
@@ -233,8 +240,9 @@ ctx.gate("E", {"folds_frozen": ctx.folds is not None})
 # F · Relevance — effect/CI/q/shape/shadow per feature (split frozen)
 rel = relevance.relevance_all(ctx, feature_types)
 effects = dict(zip(rel["column"], rel["effect"]))
-leakage.outlier_effects(ctx, effects)
-leakage.backstop_effects(ctx, effects, threshold=T.LEAK_FLAG["auc"])
+leakage.outlier_effects(ctx, effects)                       # primary leak signal (§12)
+# + backstop_effects PER METRIC (AUC effects vs LEAK_FLAG["auc"], IV vs ["iv"], …) —
+#   never one threshold across mixed metrics; adjudicate corroborates at H (§12.3)
 # → Claude decides keep / drop / review per §9 and upserts each row
 
 # G · Redundancy — collapse near-duplicates among the keeps
