@@ -23,6 +23,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"fsp: wrote {', '.join(written)} + runs/ to {args.dir}")
         else:
             print(f"fsp: already scaffolded in {args.dir} (use --overwrite to refresh)")
-        print("Next: open the folder in Claude Code and fill in `analysis/screening.py` "
-              "one part at a time (PLAYBOOK.md §3.1) — run a part, read the output, then the next.")
+        print("Next: open the folder in Claude Code and fill `analysis/parts.py` one part "
+              "at a time (PLAYBOOK.md §3.1). Run a single part with "
+              "`python analysis/screening.py c` (resumes prior state — no recompute); "
+              "omit the letter to run the whole chain.")
     return 0

@@ -60,6 +60,78 @@ def test_notebook_section_and_html(sample):
     assert html.exists() and "A · Frame" in html.read_text()
 
 
+def test_checkpoint_resume_continues_without_recompute(tmp_path):
+    import nbformat
+
+    df = pd.DataFrame({"id": range(20), "amt": [1.0, 2, 3, 4] * 5, "churn": [0, 1] * 10})
+    expected_amt = (df["amt"] * 10).tolist()  # capture before the in-place mutation below
+    runs = tmp_path / "runs"
+
+    # part 1: set up state (mutated df, scratch, ledger, folds) and checkpoint
+    ctx = fsp.open_run(df, target="churn", target_type="binary", run_id="chain", runs_dir=runs)
+    ctx.df["amt"] = ctx.df["amt"] * 10  # a mutation that must survive the round-trip
+    ctx.state["feature_types"] = {"amt": "continuous"}
+    ctx.ledger.upsert("id", semantic_type="identifier", verdict="structural-drop", reason="id")
+    ctx.folds = partition.make_folds(ctx.df, "stratified", k=2, target="churn", run_dir=ctx.run_dir)
+    ctx.notebook.add_section("C · Inventory", body="typed amt")
+    assert ctx.checkpoint().exists()
+
+    # part 2: a fresh process resumes — NO recompute — and everything is restored
+    r = fsp.resume_run("chain", runs_dir=runs)
+    assert r.df["amt"].tolist() == expected_amt  # mutated df preserved
+    assert r.state["feature_types"] == {"amt": "continuous"}  # scratch preserved
+    assert r.ledger.get("id")["verdict"] == "structural-drop"  # ledger preserved
+    assert r.folds is not None and r.folds.k == 2  # folds reloaded from disk
+    r.notebook.add_section("D · Value integrity", body="handled")  # C stays intact
+    doc = nbformat.read(str(r.run_dir / "results.ipynb"), as_version=4)
+    secs = {(c.get("metadata") or {}).get("fsp_section") for c in doc.cells}
+    assert {"C · Inventory", "D · Value integrity"} <= secs
+
+    with pytest.raises(FileNotFoundError, match="no checkpoint"):
+        fsp.resume_run("never-ran", runs_dir=runs)
+
+
+def test_notebook_notes_string_is_one_blockquote(tmp_path):
+    # regression: a note passed as a str must be ONE blockquote, not one cell per char
+    from fsp.notebook import Notebook
+
+    nb = Notebook(tmp_path / "r.ipynb", title="R")
+    nb.add_section("H · Verdict", body="done", notes="Limits. A multi-word note.")
+    import nbformat
+
+    doc = nbformat.read(str(tmp_path / "r.ipynb"), as_version=4)
+    quotes = [c for c in doc.cells if str(c.source).startswith(">")]
+    assert len(quotes) == 1 and "multi-word note" in quotes[0].source
+
+
+def test_notebook_sections_are_addressable_and_reload(tmp_path):
+    from fsp.notebook import Notebook
+
+    p = tmp_path / "results.ipynb"
+    nb = Notebook(p, title="R")
+    nb.add_section("A · Frame", body="A first.")
+    nb.add_section("B · Viability", body="B stuff.")
+    nb.add_section("A · Frame", body="A REVISED.")  # replace in place, don't duplicate
+
+    import nbformat
+
+    srcs = [str(c.source) for c in nbformat.read(str(p), as_version=4).cells]
+    assert sum(s.startswith("## A · Frame") for s in srcs) == 1  # not duplicated
+    assert any("A REVISED." in s for s in srcs) and not any("A first." in s for s in srcs)
+    a_i = next(i for i, s in enumerate(srcs) if s.startswith("## A · Frame"))
+    b_i = next(i for i, s in enumerate(srcs) if s.startswith("## B · Viability"))
+    assert a_i < b_i  # original order preserved on replace
+
+    # a fresh Notebook on the same path (a new process / partial re-run) reloads B,
+    # and updating only A leaves B intact — the whole notebook is not regenerated
+    nb2 = Notebook(p, title="R")
+    nb2.add_section("A · Frame", body="A AGAIN")
+    srcs2 = [str(c.source) for c in nbformat.read(str(p), as_version=4).cells]
+    assert any("A AGAIN" in s for s in srcs2)  # A updated
+    assert any("B stuff." in s for s in srcs2)  # B survived the reload
+    assert sum(s.startswith("## A · Frame") for s in srcs2) == 1
+
+
 def test_dispatch_covers_the_table():
     assert dispatch.metric_for("continuous", "binary").name == "AUC"
     assert dispatch.metric_for("nominal", "binary").name == "IV"
@@ -122,7 +194,9 @@ def test_provenance_and_calibration(sample, tmp_path):
 
 def test_scaffold_writes_docs_runs_and_starter(tmp_path):
     written = fsp.scaffold(tmp_path)
-    assert set(written) == {"CLAUDE.md", "PLAYBOOK.md", "TOOLS.md", "analysis/screening.py"}
+    assert set(written) == {
+        "CLAUDE.md", "PLAYBOOK.md", "TOOLS.md", "analysis/screening.py", "analysis/parts.py",
+    }
     for name in ("CLAUDE.md", "PLAYBOOK.md", "TOOLS.md"):
         assert (tmp_path / name).read_text(encoding="utf-8").strip()  # non-empty
     assert (tmp_path / "runs").is_dir()
@@ -131,9 +205,14 @@ def test_scaffold_writes_docs_runs_and_starter(tmp_path):
     for entry in ("runs/", "CLAUDE.md", "PLAYBOOK.md", "TOOLS.md"):
         assert entry in gi
     assert "analysis/" not in gi and "screening.py" not in gi  # phase code stays tracked
-    # the phase-code starter: one file for all parts, with A→H section markers
-    starter = (tmp_path / "analysis" / "screening.py").read_text(encoding="utf-8")
-    assert "import fsp" in starter and "A · Frame" in starter and "H · Verdict" in starter
+    # the runner resumes single parts (no recompute) and pins a fixed run_id
+    runner = (tmp_path / "analysis" / "screening.py").read_text(encoding="utf-8")
+    assert "resume_run" in runner and "checkpoint" in runner and 'RUN_ID = "screening"' in runner
+    # parts.py: one run_<x> per part, with A→H markers
+    parts_py = (tmp_path / "analysis" / "parts.py").read_text(encoding="utf-8")
+    assert "import fsp" in parts_py
+    assert "def run_a(ctx)" in parts_py and "def run_h(ctx)" in parts_py
+    assert "A · Frame" in parts_py and "H · Verdict" in parts_py
     # idempotent: a second call writes nothing new and doesn't duplicate .gitignore lines
     assert fsp.scaffold(tmp_path) == []
     gi2 = (tmp_path / ".gitignore").read_text()

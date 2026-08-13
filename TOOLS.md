@@ -41,9 +41,11 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 | Function | Call | Returns | Playbook |
 |---|---|---|---|
 | `open_run` | `open_run(source, *, runs_dir="runs", run_id=None, seed=42, **frame_hints)` | `RunContext` (reads data, makes run dir, starts notebook) | entry |
+| `resume_run` | `resume_run(run_id, *, runs_dir="runs")` | `RunContext` restored from `checkpoint.pkl` — **continue a later part without recomputing earlier ones** | §3.1 |
 | `RunConfig` | dataclass: `target, target_type, event_col, date_col, reference_date, id_cols, grain, prevalence, strictness_tier, seed` | frozen frame config (Part A) | §7 A |
 | `RunContext` | attrs: `df, config, run_id, run_dir, ledger, leaks, folds, state, notebook` | — | — |
 | `RunContext.gate` | `ctx.gate(part, conditions: dict[str,bool], *, notes=None)` | `bool` (writes card, raises `GateFailure`) | §4.5 |
+| `RunContext.checkpoint` | `ctx.checkpoint()` | `Path` — persist df + config + `state` + ledger + leaks so a later part can `resume_run`. Call at the end of each part. | §3.1 |
 | `RunContext.save_ledger` | `ctx.save_ledger(name="ledger.parquet")` | `Path` | §14 |
 | `LeakRegister` | `ctx.leaks.add(part, col, detector, ltype, evidence)` · `.for_column(col)` · `.signals()` | accumulates leak signals | §12 |
 
@@ -67,7 +69,7 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 
 **`ledger.py`** · `Ledger.upsert(column, **fields)` (validates `verdict` ∈ §5) · `.get(col)` · `.to_frame()` · `.save(path)`. `LEDGER_FIELDS` = the §14 schema; `VERDICTS` = the 7 of §5.
 
-**`notebook.py`** · `Notebook.add_section(title, *, body="", facts=None, tables=None, figures=None, notes=None)` (persists live) · `.save()` · `.export_html(path=None)`.
+**`notebook.py`** · `Notebook.add_section(title, *, body="", facts=None, tables=None, figures=None, notes=None)` (persists live) · `.save()` · `.export_html(path=None)`. **Sections are addressable by `title`:** re-adding a title **rewrites that section in place** (existing sections are reloaded when the run opens), so re-running one part updates only its section — the notebook is never regenerated wholesale. `notes` takes a string **or** a list of strings (each becomes one blockquote). Use a **fixed `run_id`** in `open_run` so re-runs share the folder and this incremental update engages.
 
 **`gates.py`** · `gate(ctx, part, conditions, *, notes=None) -> bool` · `GateFailure`. Empty conditions never pass.
 
@@ -162,7 +164,7 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 
 ### Setup (run once, outside the A→H loop)
 
-**`scaffold.py` / `cli.py`** · `scaffold(dest=".", *, overwrite=False) -> list[str]` and the **`fsp init`** CLI — drop the guide docs + an **`analysis/screening.py`** starter into a new project, and **gitignore `runs/` + the (regenerable) docs** (see `README.md`). The starter is one file for all parts, filled **one part at a time** (§3.1); code lives in `analysis/`, run outputs in `runs/<run-id>/`.
+**`scaffold.py` / `cli.py`** · `scaffold(dest=".", *, overwrite=False) -> list[str]` and the **`fsp init`** CLI — drop the guide docs + the phase-code starter (**`analysis/screening.py`** runner + **`analysis/parts.py`**, one `run_<x>(ctx)` per part) into a new project, and **gitignore `runs/` + the (regenerable) docs** (see `README.md`). Fill `parts.py` **one part at a time** (§3.1); `python analysis/screening.py c` runs only Part C (resumes the checkpoint — no recompute), omit the letter for the whole chain. Code lives in `analysis/`, run outputs in `runs/<run-id>/`.
 
 ---
 
@@ -189,7 +191,7 @@ Claude fills the remaining ledger fields by decision: `semantic_type` (C), `verd
 
 ## 5. Call-order reference (A → H) — run incrementally, **not** as a script
 
-This is the sequence of tools each part calls — a **reference, not a script to paste and run blind.** Per playbook §1 / §3.1 you run this **one part at a time**: call a part's tools, **read the output**, decide *from what you see*, document the section (facts + tables/figures), pass the gate, *then* move to the next part. The block below is compressed to show the order; a faithful run is incremental and inspects each part before writing the next — a semantic type can't be chosen before the inventory is seen, nor a verdict before the effect. (Corroboration at H is handled by `leakage.adjudicate`, §12.3 — don't wrap `backstop_effects` in a "flag every high effect" rule.)
+This is the sequence of tools each part calls — a **reference, not a script to paste and run blind.** Per playbook §1 / §3.1 you run this **one part at a time**: call a part's tools, **read the output**, decide *from what you see*, document the section (facts + tables/figures), pass the gate, *then* move to the next part. The block below is compressed to show the order; a faithful run is incremental and inspects each part before writing the next — a semantic type can't be chosen before the inventory is seen, nor a verdict before the effect. (Corroboration at H is handled by `leakage.adjudicate`, §12.3 — don't wrap `backstop_effects` in a "flag every high effect" rule.) In a scaffolded project this same sequence lives as `run_a…run_h` in `analysis/parts.py`, each ending `ctx.checkpoint()`; run one part with `python analysis/screening.py c` (it `resume_run`s the prior state — no recompute).
 
 ```python
 import fsp
@@ -197,7 +199,7 @@ from fsp import thresholds as T
 from fsp.parts import (frame, viability, inventory, values,
                        partition, relevance, redundancy, leakage, boruta)
 
-ctx = fsp.open_run(path, target="churn", target_type="binary", seed=42)
+ctx = fsp.open_run(path, target="churn", target_type="binary", seed=42, run_id="churn")
 
 # A · Frame — candidates/facts → Claude picks target, grain, date, ids, reference_date
 frame.target_facts(ctx.df, ctx.config.target); frame.id_candidates(ctx.df)

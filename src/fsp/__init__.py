@@ -6,7 +6,7 @@ notebook, gates). They never make a judgment call — Claude decides, guided by
 """
 
 from . import calibration, dispatch, io, metrics, parts, provenance, report, thresholds
-from .context import RunConfig, RunContext, open_run
+from .context import RunConfig, RunContext, open_run, resume_run
 from .folds import Folds
 from .gates import GateFailure, gate
 from .ledger import Ledger
@@ -18,6 +18,7 @@ __version__ = "0.2.0"
 __all__ = [
     # entry + state
     "open_run",
+    "resume_run",
     "RunContext",
     "RunConfig",
     "scaffold",

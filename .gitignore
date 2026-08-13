@@ -20,6 +20,7 @@ venv/
 runs/
 *.parquet
 *.jsonl
+*.csv
 
 # Internal design record — kept local, not published
 plan.md

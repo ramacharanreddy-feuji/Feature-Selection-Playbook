@@ -18,11 +18,18 @@ uv init my-analysis --python 3.12 && cd my-analysis
 # 2. install fsp (from the feuji repo; github-feuji is your SSH host alias — use yours)
 uv add "feature-selection-playbook @ git+ssh://git@github-feuji/ramacharanreddy-feuji/Feature-Selection-Playbook.git"
 
-# 3. scaffold the guide docs + a starter driver into the folder
-uv run fsp init          # writes CLAUDE.md, PLAYBOOK.md, TOOLS.md, analysis/screening.py + a gitignored runs/
+# 3. scaffold the guide docs + the phase-code starter into the folder
+uv run fsp init          # writes CLAUDE.md, PLAYBOOK.md, TOOLS.md, analysis/{screening.py,parts.py} + a gitignored runs/
 ```
 
-`fsp init` also drops **`analysis/screening.py`** — one file for the whole run, with A→H section markers. Fill it in **one part at a time** (run a part, read its output, decide, document, gate, then the next — PLAYBOOK.md §3.1); split a phase into its own file under `analysis/` if it grows.
+`fsp init` drops the phase-code home under **`analysis/`**: a `screening.py` **runner** and `parts.py` with one `run_<x>(ctx)` per part (A→H). Fill `parts.py` **one part at a time** (run it, read the output, decide, document, gate, then the next — PLAYBOOK.md §3.1). Run a **single part** without recomputing the rest:
+
+```sh
+python analysis/screening.py c   # runs ONLY Part C — resumes prior state from the checkpoint
+python analysis/screening.py     # runs the whole chain A→H
+```
+
+Each part `ctx.checkpoint()`s its state so the next part resumes it; `results.ipynb` updates only the section you touch (it is never regenerated wholesale).
 
 The three guide docs are **gitignored** in your project (they come from the package — regenerate any time with `fsp init`), so your repo tracks only `analysis/` and your data.
 
@@ -31,7 +38,7 @@ Then drop your data in the folder and either **open it in Claude Code** (it read
 ```python
 import fsp
 
-ctx = fsp.open_run("data.csv", target="churn", target_type="binary")
+ctx = fsp.open_run("data.csv", target="churn", target_type="binary", run_id="churn")
 # Claude follows PLAYBOOK.md Parts A→H, calling the fsp tools (see TOOLS.md):
 # frame → viability → inventory → values → partition → relevance → redundancy → verdict
 ```

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import pickle
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -90,6 +92,29 @@ class RunContext:
     def save_ledger(self, name: str = "ledger.parquet") -> Path:
         return self.ledger.save(self.run_dir / name)
 
+    def checkpoint(self) -> Path:
+        """Persist resumable run state to `run_dir/checkpoint.pkl` so a later
+        process — e.g. a separate per-part script — can `resume_run()` and continue
+        from here **without recomputing earlier parts**. Call it at the end of each
+        part. The notebook and folds already persist to their own files; this saves
+        the mutated dataframe, the frame config, the cross-part `state` scratch, and
+        the ledger + leak register."""
+        payload = {
+            "df": self.df,
+            "config": self.config.to_dict(),
+            "run_id": self.run_id,
+            "state": self.state,
+            "ledger_rows": self.ledger._rows,
+            "leak_signals": [asdict(s) for s in self.leaks._signals],
+            "has_folds": self.folds is not None,
+        }
+        p = self.run_dir / "checkpoint.pkl"
+        tmp = p.with_name(p.name + ".tmp")
+        with tmp.open("wb") as f:
+            pickle.dump(payload, f)
+        os.replace(tmp, p)
+        return p
+
 
 def open_run(
     source: str | Path | pd.DataFrame,
@@ -123,3 +148,37 @@ def open_run(
 
     config = RunConfig(seed=seed, **frame_hints)
     return RunContext(df, config, run_id, run_dir)
+
+
+def resume_run(run_id: str, *, runs_dir: str | Path = "runs") -> RunContext:
+    """Reopen a run from its checkpoint (written by `RunContext.checkpoint`) so a
+    later part can continue **without recomputing the earlier parts**. Restores the
+    mutated dataframe, config, `state` scratch, ledger, and leak register; reloads
+    the frozen folds and the notebook sections from disk. Raises if no checkpoint
+    exists yet (the first part must run `open_run` and `checkpoint`).
+
+    This is what lets each part live in its own `.py`: `ctx = fsp.resume_run("id")`
+    at the top, do the one part, `ctx.checkpoint()` at the end.
+    """
+    run_dir = Path(runs_dir) / run_id
+    ckpt = run_dir / "checkpoint.pkl"
+    if not ckpt.exists():
+        raise FileNotFoundError(
+            f"no checkpoint at {ckpt} — run the earlier part(s) with "
+            "open_run + ctx.checkpoint() first"
+        )
+    with ckpt.open("rb") as f:
+        payload = pickle.load(f)
+
+    config = RunConfig(**payload["config"])
+    ctx = RunContext(payload["df"], config, run_id, run_dir)  # notebook reloads its sections
+    ctx.state = payload.get("state", {})
+    for col, fields in payload.get("ledger_rows", {}).items():
+        ctx.ledger.upsert(col, **{k: v for k, v in fields.items() if k != "column"})
+    for s in payload.get("leak_signals", []):
+        ctx.leaks.add(s["part"], s["column"], s["detector"], s["ltype"], s["evidence"])
+    if payload.get("has_folds"):
+        from .parts.partition import load_folds
+
+        ctx.folds = load_folds(run_dir)
+    return ctx

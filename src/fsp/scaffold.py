@@ -1,9 +1,10 @@
 """Scaffold a new analysis project.
 
 Drops the three guide docs (CLAUDE / PLAYBOOK / TOOLS), a gitignored `runs/`
-output dir, and an `analysis/screening.py` starter driver into a target folder —
-so Claude Code has its operating instructions *and* a home for the phase code
-when it runs the screening. Exposed as `fsp.scaffold(...)` and the `fsp init` CLI.
+output dir, and the phase-code home — `analysis/screening.py` (a runner) plus
+`analysis/parts.py` (one `run_<x>(ctx)` per part) — into a target folder, so Claude
+Code has its operating instructions *and* a place to write the screening. Exposed as
+`fsp.scaffold(...)` and the `fsp init` CLI.
 """
 
 from __future__ import annotations
@@ -13,45 +14,118 @@ from pathlib import Path
 
 DOCS = ("CLAUDE.md", "PLAYBOOK.md", "TOOLS.md")
 
-# Starter driver dropped at `analysis/screening.py` — one file for all parts, filled
-# in **one part at a time** (never batch-written; PLAYBOOK.md §1/§3.1).
-_STARTER = '''"""Feature-selection screening — driver. Run it LIVE (PLAYBOOK.md §1, §3.1).
+# The runner — run ONE part (resumes prior state, no recompute) or the whole chain.
+_RUNNER = '''"""Feature-selection screening — runner. Run ONE part or the whole chain.
 
-Fill in ONE part at a time: call a part's fsp tools, READ the output, decide from
-what you see, document it (ctx.notebook.add_section — facts + tables/figures), pass
-the gate — THEN write the next part. Do not fill this in all at once. If a run grows,
-split a phase into its own file (e.g. analysis/part_f.py) and import what you need.
+    python analysis/screening.py          # A→H in one process (state stays in memory)
+    python analysis/screening.py d        # ONLY Part D — resumes C's checkpoint, runs D, saves
+
+It never recomputes a part you did not ask for: a single part resumes the prior
+state via fsp.resume_run() (the coerced df, ctx.state, folds, ledger), and a full
+run threads one ctx through in memory. A fixed run_id keeps every invocation in the
+same runs/<id>/ folder, and results.ipynb updates only the sections you touch — it
+is never regenerated wholesale.
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # import the sibling parts.py
+
 import fsp
+import parts
+
+RUN_ID = "screening"
+ORDER = "abcdefgh"
+
+
+def open_ctx():
+    # Part A decides target/grain — state them as corrigible claims, confirm with a human.
+    return fsp.open_run("data.csv", target="TARGET", target_type="binary", run_id=RUN_ID)
+
+
+def main(argv):
+    sel = argv[0].lower() if argv else None
+    if sel is None:  # full chain — one process, state flows in memory
+        ctx = open_ctx()
+        for key in ORDER:
+            ctx = getattr(parts, f"run_{key}")(ctx)
+        ctx.checkpoint()
+        return
+    if sel not in ORDER:
+        raise SystemExit(f"unknown part {sel!r}; pick one of {list(ORDER)} or omit for all")
+    ctx = open_ctx() if sel == "a" else fsp.resume_run(RUN_ID)  # resume — no recompute
+    getattr(parts, f"run_{sel}")(ctx)
+    ctx.checkpoint()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+'''
+
+# The eight parts — one run_<x>(ctx) each, filled ONE at a time, live (§1, §3.1).
+_PARTS = '''"""The eight screening parts — one run_<x>(ctx) each (PLAYBOOK.md §7 A–H).
+
+Fill ONE at a time, LIVE (§1, §3.1): call the part's fsp tools, READ the output,
+decide from what you see, document the section, pass the gate — THEN the next part.
+Do not batch-write the whole chain. Each run_<x> gets the ctx resumed from the
+previous part and returns it; touch only this part's notebook section (add_section
+rewrites just that one). Stash cross-part state on ctx.state (it is checkpointed),
+e.g. ctx.state["feature_types"] = {...} in run_c for run_f/run_g to reuse.
+"""
+
+import fsp  # noqa: F401
 from fsp import thresholds as T  # noqa: F401  (§9 numbers — read, never hardcode)
 from fsp.parts import (  # noqa: F401
     boruta, frame, inventory, leakage, partition, redundancy, relevance, values, viability,
 )
 
-# Part A decides these — state them as corrigible claims, confirm with a human.
-ctx = fsp.open_run("data.csv", target="TARGET", target_type="binary")
 
-# ── A · Frame ──────────────────────────────────────────────────────────────────
-# frame.target_candidates / target_facts / date_candidates / id_candidates / grain_facts
-# → decide target/grain/date/ids · ctx.notebook.add_section("A · Frame", …) · ctx.gate("A", {…})
+def run_a(ctx):
+    """A · Frame — target, grain, ids, dates (the mandatory human checkpoint)."""
+    # frame.target_candidates / target_facts / date_candidates / id_candidates / grain_facts
+    # decide ctx.config.* as corrigible claims, confirm with a human
+    # ctx.notebook.add_section("A · Frame", body=..., facts=...) ; ctx.gate("A", {...})
+    return ctx
 
-# ── B · Viability ──────────────────────────────────────────────────────────────
 
-# ── C · Inventory (semantic types + structural drops; name-leak scan) ───────────
+def run_b(ctx):
+    """B · Viability — positives, effective_n, strictness tier (§10)."""
+    return ctx
 
-# ── D · Value integrity (sentinels, distributions, co-missing; D leak detectors) ─
 
-# ── E · Partition (freeze folds — the leakage guard opens here) ─────────────────
+def run_c(ctx):
+    """C · Inventory — semantic type per column + structural drops; name-leak scan.
+    Stash the decided types: ctx.state["feature_types"] = {...}."""
+    return ctx
 
-# ── F · Relevance + stability (effect/CI/q/shape/shadow per feature) ────────────
 
-# ── G · Redundancy (collapse near-duplicates ≥ 0.95 among the keeps) ────────────
+def run_d(ctx):
+    """D · Value integrity — sentinels (null them), missingness, co-missing; D leak detectors."""
+    return ctx
 
-# ── H · Verdict (adjudicate leaks §12.3, Boruta cross-check, final verdicts) ─────
 
-# ── Deliverables ────────────────────────────────────────────────────────────────
-# ctx.notebook.export_html(); ctx.save_ledger(); fsp.provenance.save(ctx)
+def run_e(ctx):
+    """E · Partition — pick the split (§11), freeze folds. The leakage guard opens here."""
+    return ctx
+
+
+def run_f(ctx):
+    """F · Relevance + stability — per-feature effect/CI/q/shape/shadow (split frozen)."""
+    return ctx
+
+
+def run_g(ctx):
+    """G · Redundancy — collapse near-duplicates ≥ 0.95 among the keeps; VIF flag."""
+    return ctx
+
+
+def run_h(ctx):
+    """H · Verdict — adjudicate leaks (§12.3), Boruta cross-check, final verdicts, deliverables."""
+    # ... finalize every verdict + reason ...
+    # ctx.save_ledger("ledger.parquet"); ctx.save_ledger("ledger.csv")
+    # ctx.notebook.export_html(); fsp.provenance.save(ctx)
+    return ctx
 '''
 
 
@@ -72,9 +146,10 @@ def _read_doc(name: str) -> str:
 
 
 def scaffold(dest: str | Path = ".", *, overwrite: bool = False) -> list[str]:
-    """Copy the guide docs + an `analysis/screening.py` starter into `dest`, and
-    gitignore `runs/` plus the (regenerable) guide docs. Returns the files written;
-    existing files are left untouched unless `overwrite=True`."""
+    """Copy the guide docs + the `analysis/` phase-code starter (`screening.py`
+    runner + `parts.py`) into `dest`, and gitignore `runs/` plus the (regenerable)
+    guide docs. Returns the files written; existing files are left untouched unless
+    `overwrite=True`."""
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -99,11 +174,12 @@ def scaffold(dest: str | Path = ".", *, overwrite: bool = False) -> list[str]:
                 f.write("\n")
             f.write("\n".join(to_ignore) + "\n")
 
-    # A home for the phase code (tracked, not gitignored) — one file for all parts.
+    # A home for the phase code (tracked, not gitignored): a runner + one file of parts.
     (dest / "analysis").mkdir(exist_ok=True)
-    starter = dest / "analysis" / "screening.py"
-    if not starter.exists() or overwrite:
-        starter.write_text(_STARTER, encoding="utf-8")
-        written.append("analysis/screening.py")
+    for rel, text in (("analysis/screening.py", _RUNNER), ("analysis/parts.py", _PARTS)):
+        target = dest / rel
+        if not target.exists() or overwrite:
+            target.write_text(text, encoding="utf-8")
+            written.append(rel)
 
     return written
