@@ -120,16 +120,24 @@ def test_provenance_and_calibration(sample, tmp_path):
     assert fsp.calibration.append(tmp_path / "cal.jsonl", rec).exists()
 
 
-def test_scaffold_writes_docs_and_runs(tmp_path):
+def test_scaffold_writes_docs_runs_and_starter(tmp_path):
     written = fsp.scaffold(tmp_path)
-    assert set(written) == {"CLAUDE.md", "PLAYBOOK.md", "TOOLS.md"}
+    assert set(written) == {"CLAUDE.md", "PLAYBOOK.md", "TOOLS.md", "analysis/screening.py"}
     for name in ("CLAUDE.md", "PLAYBOOK.md", "TOOLS.md"):
         assert (tmp_path / name).read_text(encoding="utf-8").strip()  # non-empty
     assert (tmp_path / "runs").is_dir()
-    assert "runs/" in (tmp_path / ".gitignore").read_text()
-    # idempotent: a second call writes nothing new and doesn't duplicate .gitignore
+    gi = (tmp_path / ".gitignore").read_text()
+    # run outputs + the regenerable guide docs are gitignored; the user's code is not
+    for entry in ("runs/", "CLAUDE.md", "PLAYBOOK.md", "TOOLS.md"):
+        assert entry in gi
+    assert "analysis/" not in gi and "screening.py" not in gi  # phase code stays tracked
+    # the phase-code starter: one file for all parts, with A→H section markers
+    starter = (tmp_path / "analysis" / "screening.py").read_text(encoding="utf-8")
+    assert "import fsp" in starter and "A · Frame" in starter and "H · Verdict" in starter
+    # idempotent: a second call writes nothing new and doesn't duplicate .gitignore lines
     assert fsp.scaffold(tmp_path) == []
-    assert (tmp_path / ".gitignore").read_text().count("runs/") == 1
+    gi2 = (tmp_path / ".gitignore").read_text()
+    assert gi2.count("runs/") == 1 and gi2.count("CLAUDE.md") == 1
 
 
 def test_cli_init(tmp_path, capsys):

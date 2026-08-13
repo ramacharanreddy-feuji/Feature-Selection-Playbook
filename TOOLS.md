@@ -160,6 +160,10 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 
 **`scorecard.py`** · `scorecard(ledger) -> dict` · `review_export(ledger, path) -> Path` · `limits_note() -> str` (§13).
 
+### Setup (run once, outside the A→H loop)
+
+**`scaffold.py` / `cli.py`** · `scaffold(dest=".", *, overwrite=False) -> list[str]` and the **`fsp init`** CLI — drop the guide docs + an **`analysis/screening.py`** starter into a new project, and **gitignore `runs/` + the (regenerable) docs** (see `README.md`). The starter is one file for all parts, filled **one part at a time** (§3.1); code lives in `analysis/`, run outputs in `runs/<run-id>/`.
+
 ---
 
 ## 4. Cross-cutting contracts

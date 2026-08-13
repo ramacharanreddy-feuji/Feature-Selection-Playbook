@@ -7,21 +7,26 @@ Three docs, three jobs:
 - **[`TOOLS.md`](TOOLS.md)** — the *catalogue* of the `fsp` package: the deterministic tools you call.
 - **[`CLAUDE.md`](CLAUDE.md)** — the *entry*: operating instructions Claude Code reads when it runs the screening.
 
-## Install
+## Install & start in a new folder
+
+> ⚠️ **Use Python 3.12.** `optbinning` (→ `ortools`) has no Python 3.13 wheel yet, so a 3.13 environment will fail to install. Pin 3.12 as shown.
 
 ```sh
+# 1. create the project ON Python 3.12 (do it in one step — see the note above)
+uv init my-analysis --python 3.12 && cd my-analysis
+
+# 2. install fsp (from the feuji repo; github-feuji is your SSH host alias — use yours)
 uv add "feature-selection-playbook @ git+ssh://git@github-feuji/ramacharanreddy-feuji/Feature-Selection-Playbook.git"
+
+# 3. scaffold the guide docs + a starter driver into the folder
+uv run fsp init          # writes CLAUDE.md, PLAYBOOK.md, TOOLS.md, analysis/screening.py + a gitignored runs/
 ```
 
-(`github-feuji` is an SSH host alias — use whatever alias your key is configured under.)
+`fsp init` also drops **`analysis/screening.py`** — one file for the whole run, with A→H section markers. Fill it in **one part at a time** (run a part, read its output, decide, document, gate, then the next — PLAYBOOK.md §3.1); split a phase into its own file under `analysis/` if it grows.
 
-## Start a new analysis project
+The three guide docs are **gitignored** in your project (they come from the package — regenerate any time with `fsp init`), so your repo tracks only `analysis/` and your data.
 
-```sh
-fsp init            # drops CLAUDE.md, PLAYBOOK.md, TOOLS.md + a gitignored runs/ into the folder
-```
-
-Then open the folder in Claude Code and, in your notebook:
+Then drop your data in the folder and either **open it in Claude Code** (it reads `CLAUDE.md` and drives the whole screening) or use `fsp` directly in a notebook:
 
 ```python
 import fsp

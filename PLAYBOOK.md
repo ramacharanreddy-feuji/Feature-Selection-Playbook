@@ -383,7 +383,7 @@ State these in the notebook so nobody over-trusts the run:
 
 The deliverable is the **documented results notebook** you build: a section per part (§3.1), ending with the **ledger** — one row per column. Together they are the report a data scientist reads top to bottom.
 
-**Section convention:** each part's section has a heading (`A · Frame` … `H · Verdict`), a short prose paragraph on what you found and why, then the tables and figures behind it. **Derived datetime features** (§8) get their own ledger rows, named for the derivation (e.g. `signup_date__dow`).
+**Section convention — show the results, don't just log them.** Each part's section carries **three** things, not one: (1) **markdown prose** — what the tools returned *and why you decided as you did* (the judgment, in plain language); (2) the part's **table(s)** — the facts / relevance table / ledger view via `fsp.report.tables`; and (3) the part's **figure(s)** via `fsp.report.figures` — e.g. the **missingness bar** at D, the **effect-ranking** at F, the **redundancy heatmap** at G, a distribution histogram where one drove a call. Use `fsp.notebook.add_section(body=…, facts=…, tables=…, figures=…, notes=…)` so all of it renders in `results.ipynb`. A reader must be able to follow the whole run **from the notebook alone, without the code**. A bare one-line section — a number with no table or figure — is **not** a documented part (§3.1, §4.5). **Derived datetime features** (§8) get their own ledger rows, named for the derivation (e.g. `signup_date__dow`).
 
 Record every column with these fields:
 
