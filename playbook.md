@@ -1,31 +1,31 @@
-# Feature Selection Playbook — Operating Spec
+# Feature Selection Playbook — a guide for Claude Code
 
-**Status:** v1 — locked 2026-08-11
+**Status:** v2 — locked 2026-08-13
 
-This document is the *operating spec* — what to do, in what order, with which command. It governs execution.
+You are Claude Code. Handed a path to a single dataframe, you run the whole feature-selection screening yourself: you **write and run the code**, part by part, and produce a **documented notebook** — a ranked, reasoned shortlist with a verdict and a reason for every column. A human still makes the final feature decision (§16).
 
-> This is the procedure an agent (e.g. Claude Code) follows when handed a path to a single dataframe. It reads the file, understands every row and column, and hands a data scientist a **ranked, reasoned shortlist** — a verdict with a reason per feature, not a final feature set. A human still makes the real decision (see §16).
+This document is the **guide**, not a library. It gives you the **method** (what to do, in what order), the **rules and thresholds** (how to decide), and the **exact math** (§17, so your code is correct). You supply the code and the judgment. There is no `dsp` package — you use ordinary libraries (pandas, numpy, scipy, scikit-learn, statsmodels, lifelines, optbinning, matplotlib, nbformat) and write the analysis yourself.
 
 ---
 
 ## 0. How to read this document
 
-- **Parts A–H** run in order. Most of the order is soft; four edges are hard (§4.4).
-- Every statistic is produced by a **`dsp` command** (§6). The agent never writes its own EDA code (§1).
-- Each part ends at a **gate** (§4.5). A gate is an exit code, not a suggestion.
-- The output is the **ledger** (§14): one row per column, with a verdict and a reason.
-- Numbers you must not invent are in the **Thresholds** table (§9) and **Metric definitions** (§17), each with a source.
+- You run **Parts A–H** in order, each as the same four-step loop (§3.1): **compute → decide → document → verify.**
+- **You write the code.** The *methods, thresholds, and formulas* come from this guide — never improvised (§1).
+- Each part ends at a **gate** (§4.5): a self-check you must pass before moving on. If it fails, **stop**.
+- The **deliverable is a documented notebook** that you grow one section per part (§14). The per-column **ledger** is its final section.
+- The numbers you must not invent are in the **Thresholds** table (§9); the formulas you must implement exactly are in **Metric definitions** (§17). Both are sourced.
 
 ---
 
 ## 1. Prime directive
 
-> **Never write your own EDA code. Every statistic comes from a `dsp` command. If you need a statistic the library does not compute, STOP and tell the user — do not improvise it in pandas.**
+> **You write and run the code. But the methods, thresholds, and formulas come from this guide — never improvised. If this guide doesn't specify how to measure something, STOP and ask the user; do not invent a method.**
 
-Why this is absolute: if the agent improvises statistics, output shape drifts every run, nothing is comparable across projects, and the thresholds below become meaningless because they were calibrated against `dsp`'s exact definitions. The markdown says *when* and *why*; the package guarantees *how*.
+Why this is absolute: the value of a screening tool is that runs are **comparable** — same tests, same thresholds, same output shape, across every dataset and project. If you improvise methods or numbers, that comparability is lost and the thresholds below become meaningless (they were chosen against the exact definitions in §17). The guide fixes the **what** and the **numbers**; you own the **how** (the code) and adapt it to the data in front of you.
 
 Corollary rules:
-- **No raw thresholds hard-coded in agent reasoning.** Read them from `dsp` config so a single change propagates.
+- **Use the exact numbers in §9 and formulas in §17.** Do not hardcode a different threshold or a rougher approximation of a metric.
 - **No per-feature target-association statistic before the folds exist (Part E).** Only Part B's aggregate viability facts and Part D's missingness-leak diagnostic may touch the target earlier. See §4.4 edge 3 — the most-violated, least-noticed rule.
 - **Every drop stays in the ledger.** `drop` means "excluded from the first model," never "deleted."
 
@@ -35,9 +35,9 @@ Corollary rules:
 
 | Role | Who | Responsibility |
 |---|---|---|
-| **Orchestrator** | The agent | Reads this playbook, calls `dsp` commands in order, makes the judgment calls the playbook reserves for judgment, asks the human the ≤2 questions at Part A, assembles the ledger. |
-| **Engine** | The `dsp` package | Computes every statistic, writes every artifact, enforces every gate. Deterministic and comparable across runs. |
-| **Decider** | The human | Reviews the ledger, applies domain knowledge the data cannot contain, makes the final feature decision. Confirms Part A (the one mandatory-human step). |
+| **Brain + hands** | You (Claude Code) | Read this guide, **write and run the code** for each part, **make every decision** (frame, semantic type, drop/keep, verdicts) using the rules here, document each step in the notebook, and self-check the gate. Adapt the code to the data; fix your own errors. Ask the human the ≤2 questions at Part A. |
+| **The guide** | This document | Fixes the method, order, decision rules, thresholds (§9), and exact math (§17). The single source of truth for *what* and *how much* — never *what code*. |
+| **Decider** | The human | Reviews the notebook, applies domain knowledge the data cannot contain, makes the final feature decision. Confirms Part A (the one mandatory-human step). |
 
 ---
 
@@ -58,12 +58,27 @@ A Frame ──▶ B Viability ──▶ C Inventory ──▶ D Value integrity 
 
 **First five parts describe the data; last three judge it.** You cannot judge what you have not described.
 
+### 3.1 The operating loop — how you run every part
+
+Every part is the **same four steps.** This is the core of how you work:
+
+| Step | You do | With |
+|---|---|---|
+| **1. Compute** | Write and run code to produce the facts/statistics this part needs. Use the **exact method** from §8/§17. | pandas, scipy, sklearn, statsmodels, lifelines, optbinning |
+| **2. Decide** | Apply this guide's **rules and thresholds** (§5, §8, §9) to the numbers. This is your judgment. | §5 verdicts, §8 dispatch, §9 thresholds |
+| **3. Document** | Append a written section to the live notebook — prose explaining what you found and why, plus the tables and figures behind it. | nbformat / matplotlib |
+| **4. Verify** | Check the part's **gate conditions** (§7). If any fails, **stop** and report — do not proceed. | §4.5, §15 |
+
+Two habits that make this trustworthy:
+- **Document as you go, not at the end.** The notebook is written incrementally so a human can watch the analysis unfold and audit each step.
+- **When in doubt, keep and flag.** The cost asymmetry (§4.2) means a wrongly-dropped feature is a silent, permanent loss; a wrongly-kept one costs a reviewer four seconds.
+
 ---
 
 ## 4. Global rules
 
 ### 4.1 All-relevant, not minimal-optimal
-Find **every** feature carrying usable signal, including redundant ones. We do **not** use mRMR or RFE (their objective is wrong for us). Part G collapses **only near-duplicates (≥ 0.95)** — deduplication, never compression. The 0.95 cut is a design commitment; **never lower it to "reduce feature count."**
+Find **every** feature carrying usable signal, including redundant ones. Do **not** use mRMR or RFE (their objective is wrong for us). Part G collapses **only near-duplicates (≥ 0.95)** — deduplication, never compression. The 0.95 cut is a design commitment; **never lower it to "reduce feature count."**
 
 ### 4.2 The cost asymmetry governs every threshold
 | Error | Cost |
@@ -74,7 +89,7 @@ Find **every** feature carrying usable signal, including redundant ones. We do *
 **Tune for high recall on drops.** Every threshold sits **one tier below** the conventional "weak" boundary. We answer "is this so weak that showing it wastes someone's time," not "is this good enough to use." Be visibly, deliberately cowardly about dropping.
 
 ### 4.3 Shadow-permutation floor is the primary criterion
-For every feature, `dsp` computes an effect against the effect achievable at random — estimated by **permuting that same column** (Boruta's mechanism). The fixed constants in §9 are **backstops reported alongside**, not the primary bar. The shadow floor self-calibrates to cardinality, sample size, skew, and missingness for free.
+For every feature, compare its effect against the effect achievable at random — estimated by **permuting that same column** and recomputing the same metric (Boruta's mechanism, §17.5). The fixed constants in §9 are **backstops you report alongside**, not the primary bar. The shadow floor self-calibrates to cardinality, sample size, skew, and missingness for free.
 
 ### 4.4 Hard ordering — four edges that are NOT negotiable
 1. **A → B.** Viability sets strictness for everything after.
@@ -82,14 +97,14 @@ For every feature, `dsp` computes an effect against the effect achievable at ran
 3. **E before F.** The split must exist before any per-feature target-association statistic runs (Part B's aggregate viability and Part D's missingness diagnostic are the only permitted earlier target contact). *This is the constraint people violate most and notice least.*
 4. **F before G.** Representative selection needs effect sizes.
 
-### 4.5 Gates are exit codes
-Each part ends with `dsp.gate("<part>")`. If exit conditions are unmet, it fails and the run stops. "Do not proceed without X" is enforced, not suggested.
+### 4.5 Gates are self-checks, not suggestions
+Each part ends with explicit **exit conditions** (§7). Before you move on, verify them in code and state the result in the notebook. If a condition fails, **stop the run and report which one and why** (§15). "Do not proceed without X" is a hard stop you enforce on yourself — not a soft guideline.
 
-### 4.6 Artifacts — every part writes the same shapes
-- **Decision card** (JSON): what the part decided and why.
-- **Parquet**: any per-row or per-column table (fold indices, ledger rows).
-- **JSONL**: append-only event log.
-- **Figure + sidecar**: every plot ships with a machine-readable sidecar of the numbers behind it.
+### 4.6 Outputs — what every part leaves behind
+- **A notebook section** (§14): prose + the tables and figures behind your decisions, appended live.
+- **Ledger rows** (§14): one row per column, updated as parts touch it — the audit trail.
+- **Frozen fold indices** (Part E): written to disk so every later part and the modeling team reuse the identical split.
+- **Reproducibility:** set a fixed random seed; state it. Same data + same guide ⇒ same verdicts.
 
 ---
 
@@ -103,152 +118,102 @@ Every column exits with exactly one verdict in the ledger:
 | `review` | Borderline — survived because of the cost asymmetry. A human should look. Default for anything uncertain. |
 | `drop` | Excluded from the first model. **Still in the ledger with its numbers.** Never deleted. |
 | `redundant` | Statistically near-duplicate (≥ 0.95) of a kept representative. Which one was kept is recorded. |
-| `engineer` | Not usable raw, but flags a human to derive something (e.g. a datetime, a ratio the business believes in). The tool does **not** generate it. |
+| `engineer` | Not usable raw, but flags a human to derive something (e.g. a datetime, a ratio the business believes in). You do **not** generate it. |
 | `leak-suspect` | Effect so strong / structurally suspicious it likely encodes the target. Flagged, never silently kept or dropped — adjudicated at H. |
 | `structural-drop` | Removed by a rule needing no calibration (constant, id, duplicate, near-empty). |
 
 ---
 
-## 6. The `dsp` command surface
+## 6. What each part must produce
 
-> This is the contract the library must satisfy. Each command writes its artifacts (§4.6) and returns a typed object the next part reads. Signatures are the target API.
+There is no fixed API — you write the code. For each part you **compute** the left column, **decide** using the rules, **record** the result in the ledger/notebook, and **verify** the gate. This table is the contract at a glance; §7 is the detail.
 
-### 6.0 Infrastructure
-| Command | Returns / effect |
-|---|---|
-| `dsp.load(path)` | `RunContext` — the dataframe handle + config, the single object every part reads/writes. |
-| `dsp.gate(part)` | Raises `GateFailure` (non-zero) if the part's exit conditions are unmet. |
-| `dsp.query.*` | The only sanctioned data-access layer (counts, groupbys, crosstabs). Agent never touches pandas directly. |
-| `dsp.ledger` | The growing per-column ledger; every part appends. |
-
-### 6.1 Part A — Frame
-| Command | Returns |
-|---|---|
-| `dsp.frame.infer(ctx)` | Config: `target`, `target_type`, `date_col?`, `id_cols`, `grain`, `prevalence`. Every inference is a **corrigible claim**, not a fact. |
-| `dsp.frame.questions(ctx)` | The ≤2 questions to ask the human (only where the data genuinely cannot answer). |
-| `dsp.frame.confirm(ctx, answers)` | Freezes the config after the human checkpoint. |
-
-### 6.2 Part B — Viability
-| Command | Returns |
-|---|---|
-| `dsp.viability.assess(ctx)` | `positives` (count, not rate), `target_nulls`, `prevalence`, `censoring`, `effective_n`, and the **strictness tier** (§10). |
-
-### 6.3 Part C — Inventory
-| Command | Returns |
-|---|---|
-| `dsp.inventory.semantic_types(ctx)` | Semantic type per column (§8) — *not* dtype. |
-| `dsp.inventory.structural_drops(ctx)` | Constants, >98% single value, identifiers, exact duplicates → `structural-drop`. |
-| `dsp.profile.wrap(ctx)` | Wraps `ydata-profiling` / `sweetviz` (optional extra) for dtypes/cardinality/distributions. Never rebuild these. |
-
-### 6.4 Part D — Value integrity
-| Command | Returns |
-|---|---|
-| `dsp.values.sentinels(ctx)` | Sentinel register (`-999`, `9999`, `""`, etc.). **Nulls them before F.** |
-| `dsp.values.distributions(ctx)` | Distribution verdicts per column (skew, zero-inflation, spikes). |
-| `dsp.values.missingness(ctx)` | Missingness rate + **co-missing clusters** (columns that go missing together). |
-| `dsp.values.missingness_predicts_target(ctx)` | For each column: does its missingness indicator predict the target? Reports `AUC`, not a mechanism label. |
-
-### 6.5 Part E — Partition
-| Command | Returns |
-|---|---|
-| `dsp.partition.strategy(ctx)` | Split strategy **derived** from grain + time presence (§11), not chosen. |
-| `dsp.partition.make_folds(ctx)` | Frozen fold indices written to disk (parquet). Every later part and the modeling team use these exact folds. |
-
-### 6.6 Part F — Relevance + stability
-| Command | Returns |
-|---|---|
-| `dsp.relevance.run(ctx)` | Per feature, **on training folds only**: native effect (§8 dispatch), CI, **q-value** (BH-FDR), shape gap (`x_stat − c_stat`), and **fold spread** (stability). |
-| `dsp.relevance.shadow_floor(ctx, col)` | The permutation floor for that column (§4.3). Primary pass/fail. |
-
-### 6.7 Part G — Redundancy
-| Command | Returns |
-|---|---|
-| `dsp.redundancy.pairs(ctx)` | Native pairwise metric per feature pair (Spearman / Cramér's V / η). |
-| `dsp.redundancy.components(ctx, threshold=0.95)` | **Connected components** on edges ≥ 0.95, plus a deterministic representative per component. No dendrogram, no cut height. |
-
-### 6.8 Part H — Verdict
-| Command | Returns |
-|---|---|
-| `dsp.leakage.adjudicate(ctx)` | Resolves the accumulated leak register (§13) once, as a batch. |
-| `dsp.boruta.crosscheck(ctx)` | All-relevant safety net: fits Boruta on surviving **and** dropped features; flags anything Boruta confirms that the filter dropped (§16). |
-| `dsp.verdict.ledger(ctx)` | The final ledger — verdict + reason per column. |
-| `dsp.verdict.handoff(ctx)` | The human-facing summary (§14.1). |
+| Part | You compute | You decide | You record | Gate check |
+|---|---|---|---|---|
+| **A** Frame | candidate target / date / id facts; class balance | target, target_type, date_col, id_cols, grain | the frame config | target resolved (or "no target"); grain stated in plain language |
+| **B** Viability | positives (count), target nulls, effective_n, prevalence, censoring | strictness tier (§10) | tier + the numbers | effective_n > 0; tier set |
+| **C** Inventory | per-column dtype, cardinality, %missing, uniqueness, duplicate map | semantic type (§8) per column; structural drops (§9.2) | type + verdict per column | every column has a semantic type |
+| **D** Value integrity | sentinel candidates, distributions, missingness, co-missing clusters | which sentinels are real; `engineer` flags | sentinel register; nulled sentinels | sentinels nulled; missingness mapped |
+| **E** Partition | grain + time presence | split strategy (§11) and k | frozen fold indices to disk | folds exist before any F statistic |
+| **F** Relevance + stability | per §8 dispatch, on train folds only: effect, CI, q-value, shape gap, fold spread, shadow floor | `keep`-eligible / `drop` / `review` per §9 | metrics + verdict per feature | every non-structural column has metrics + a decision |
+| **G** Redundancy | pairwise native metric; components at ≥ 0.95 | representative per component; `review` for 0.70–0.95 | `redundant_with` links | every kept feature is unique or a representative |
+| **H** Verdict | leak signals (§12); Boruta cross-check (§16) | adjudicate leaks; final verdict + reason for every column | final ledger; closing section | every column has exactly one verdict + a non-empty reason |
 
 ---
 
 ## 7. Part-by-part procedure
 
-Each part below: **purpose → run → decide → leak detectors that fire here → gate.**
+Each part follows the §3.1 loop. Below, per part: what to **compute**, what to **decide**, which **leak detectors** fire, and the **gate** to verify. Document each part in the notebook before you gate.
 
 ### Part A — Frame  *(no target contact yet)*
 - **Purpose:** state what we are predicting, for whom, at what grain.
-- **Run:** `dsp.frame.infer(ctx)`. Auto-derive target, target type, date column, whether IDs repeat, prevalence.
-- **Decide:** Ask back only via `dsp.frame.questions` where the data genuinely cannot answer — usually 0–2 questions. Then `dsp.frame.confirm`.
-- **Human checkpoint (mandatory):** This is the **only part with no automated error detector**. Detectable errors (non-unique keys, target nulls) get caught later; **silent errors** (wrong grain, ambiguous negatives, prediction-time = event-time, survivorship in the population, target drift) produce a flawless analysis of the *wrong question*. State every inference as a corrigible claim; record every assumption.
+- **Compute:** candidate targets, target class balance / dtype / cardinality, columns that parse as dates, columns that are unique-per-row or named like ids, whether any id repeats.
+- **Decide & record:** *you* choose the target, target type (one of §8's five), date column, id columns, and grain — each a **corrigible claim**. Ask the human only where the data genuinely cannot answer (0–2 questions).
+- **Human checkpoint (mandatory):** This is the **only part with no automated error detector**. Detectable errors (non-unique keys, target nulls) get caught later; **silent errors** (wrong grain, ambiguous negatives, prediction-time = event-time, survivorship in the population, target drift) produce a flawless analysis of the *wrong question*. State every inference as a corrigible claim; record every assumption in the notebook.
 - **Leak detectors:** none yet.
-- **Gate `A`:** config frozen, target identified (or explicitly "no target"), grain stated in plain language.
+- **Gate `A`:** config recorded, target identified (or explicitly "no target"), grain stated in plain language.
 
 ### Part B — Viability  *(first target contact — allowed, no per-row modeling)*
 - **Purpose:** is there enough target to learn from, and how strict should we be?
-- **Run:** `dsp.viability.assess(ctx)`.
-- **Decide:** Set the strictness tier consumed by every later part. Cheapest part to run; was missing from early drafts.
-- **Gate `B`:** viability floor met — **≥ 50 positives total and ≥ 10 per fold** (§9). Below that, drop to the small-n ladder (§10) or halt with a clear message.
+- **Compute:** positives (the minority-class count for classification; **events** for survival; non-null rows for regression), target nulls, prevalence, censoring, and `effective_n` (defined in §10).
+- **Decide & record:** set the **strictness tier** (§10) from `effective_n`; it governs every later part. Cheapest part to run.
+- **Gate `B`:** effective_n > 0. **Viability floor:** classification ≥ 50 positives (and ≥ 10/fold); **survival** ≥ 50 events; **regression** effective_n ≥ 100. Below the floor, drop to the small-n ladder (§10) or halt with a clear message.
 
 ### Part C — Inventory  *(no target)*
 - **Purpose:** what is each column, *structurally*?
-- **Run:** `dsp.inventory.semantic_types(ctx)`, then `dsp.inventory.structural_drops(ctx)`, optionally `dsp.profile.wrap(ctx)`.
-- **Decide:** Semantic type is **not dtype** — an 8-level integer is categorical; a 40,000-level string is an identifier. This decides which test each column gets in F. Get it wrong and every downstream number uses the wrong method.
+- **Compute:** for every column — dtype, cardinality, %missing, top values, sample values, uniqueness; the exact-duplicate-column map.
+- **Decide & record:** *you* assign each column's **semantic type** (§8 feature types) from the facts — it is **not dtype** (an 8-level integer is categorical; a 40,000-level string is an identifier), and it decides which test the column gets in F. Mark structural drops (§9.2). The target and date column are never structural-dropped.
 - **Leak detectors:** **name heuristics** fire here (columns named like the target, `*_flag` created post-outcome, `score`, `prediction`, `target_*`). Record to the register; do not act yet.
 - **Gate `C`:** every column has a semantic type; structural drops recorded in the ledger.
 
 ### Part D — Value integrity  *(partly target)*
 - **Purpose:** which values are real, which absent, and why.
-- **Run:** `dsp.values.sentinels` → **null the sentinels** → `dsp.values.distributions` → `dsp.values.missingness` → `dsp.values.missingness_predicts_target`.
-- **Decide:** Co-missing clusters reveal shared upstream failures; the *cluster membership indicator* is often a better feature than any member — flag as `engineer`.
-- **Leak detectors:** **future timestamps** and **missingness-predicts-target leaks** fire here. Report `missingness_predicts_target: AUC 0.71` — an honest measurement, **not** an `MNAR` label the data cannot support (Little's MCAR test is rejected — it assumes multivariate normality, is unreliable for categoricals, and breaks numerically above ~30 variables).
-- **Gate `D`:** all sentinels nulled (**hard prerequisite for F**, §4.4 edge 2); missingness map complete.
+- **Compute:** sentinel candidates (e.g. `-999`, `9999`, `""`, `"unknown"`), distributions (skew, zero-inflation, spikes), missingness rate, and **co-missing clusters** (columns that go missing together — correlate the null-masks, group at ≥ 0.95). Then **null the confirmed sentinels** (hard prerequisite for F, §4.4 edge 2).
+- **Decide & record:** confirm which sentinel candidates are real (corrigible). A co-missing cluster's *membership indicator* is often a better feature than any member — flag it `engineer`.
+- **Leak detectors:** **future timestamps** and **missingness-predicts-target** fire here. Report `missingness_predicts_target: AUC 0.71` — an honest measurement, **not** an `MNAR` label the data cannot support (Little's MCAR test is rejected — it assumes multivariate normality, is unreliable for categoricals, and breaks numerically above ~30 variables).
+- **Gate `D`:** all confirmed sentinels nulled; missingness map complete.
 
 ### Part E — Partition  *(no target values touched — only indices)*
 - **Purpose:** which rows may inform the analysis, held identical for everyone downstream.
-- **Run:** `dsp.partition.strategy(ctx)` then `dsp.partition.make_folds(ctx)`.
-- **Decide:** Strategy is **derived** from grain + time:
-  - Has a usable date → **time-based split** (train past, validate future).
-  - Repeating entity id (grain coarser than row) → **grouped folds** (an entity never spans folds).
-  - Otherwise → **stratified K-fold** on the target.
-  - Small-n → fewer folds per §10.
-- **Gate `E`:** folds frozen to disk. **Nothing downstream may touch the target until this gate passes** (§4.4 edge 3).
+- **Compute:** grain + time presence.
+- **Decide & record:** *you* pick the split from grain + time (§11), then **freeze fold indices to disk** so every later part reuses the identical split.
+- **Gate `E`:** folds frozen. **Nothing downstream may touch the target with a per-feature statistic until this gate passes** (§4.4 edge 3).
 
 ### Part F — Relevance + stability  *(target — train folds only)*
 - **Purpose:** does each feature relate to the target, reliably?
-- **Run:** `dsp.relevance.run(ctx)` — dispatches the right test per feature type × target type (§8), **on training folds only**, with:
+- **Compute (per feature, on training folds only):** first derive any datetime feature into its parts and split any zero-inflated count into `is_zero` + positives (§8); then run the native test per feature type × target type (§8 dispatch), with:
   - **Effect size** on the native scale, labeled with its metric name.
-  - **Confidence interval** on the effect.
+  - **Confidence interval** on the effect — the uniform bootstrap-percentile method (§17.12).
   - **q-value** — Benjamini-Hochberg FDR across all features (§17.6).
-  - **Shape gap** `x_stat − c_stat` — how much signal a monotone metric is discarding (§17.2). Large gap → non-monotone signal → `review`/`engineer`, never auto-drop.
-  - **Fold spread** — stability across folds, nearly free because computed per fold.
-  - **Shadow floor** (`dsp.relevance.shadow_floor`) — the primary bar (§4.3).
-- **Decide (per feature):**
+  - **Shape gap** `x_stat − c_stat` — how much signal a monotone metric is discarding (§17.2). **Binary target only** (leave blank where undefined). Large gap → non-monotone signal → `review`/`engineer`, never auto-drop.
+  - **Fold spread** — stability across folds, nearly free because you compute per fold.
+  - **Shadow floor** — the primary bar (§4.3, §17.5): permute the column, recompute the same metric, take a high percentile.
+- **Missing values — available-case (pairwise):** compute each feature's association on the rows where **both** the feature and the target are present. **Never impute for the association** — imputation biases the estimate. If a feature's pairwise n falls below the §10 floor, mark it `reduced-power` (or structural-only under 30). Rows with a null *target* are excluded from every association.
+- **Decide & record (per feature):**
   - Effect **below both** the shadow floor **and** the §9 backstop, with a stable (narrow) fold spread → `drop`.
   - Effect above the floor → `keep`-eligible (final `keep` after G).
   - Anything borderline, unstable across folds, or with a large shape gap → `review`.
   - Never rank globally — rank **within feature type** (§8).
-- **Leak detectors:** **suspicious effect sizes** fire here (outlier-relative-to-peers, §13). Record; adjudicate at H.
-- **Gate `F`:** every non-structural column has an effect, CI, q-value, shape gap, fold spread, and a shadow-floor decision.
+- **Leak detectors:** **suspicious effect sizes** fire here (outlier-relative-to-peers, §12). Record; adjudicate at H.
+- **Gate `F`:** every non-structural column has an effect, CI, q-value, fold spread, a shadow-floor decision, and — for a binary target — a shape gap.
 
 ### Part G — Redundancy  *(no target)*
 - **Purpose:** who duplicates whom.
-- **Run:** `dsp.redundancy.pairs(ctx)` → `dsp.redundancy.components(ctx, threshold=0.95)`.
-- **Decide:** Within each connected component (edges ≥ 0.95), keep the deterministic representative (highest Part-F effect, ties broken by fewer missing, then name order). Others → `redundant`, with the representative recorded. Pairs in **0.70–0.95** → `review` (redundancy-review band), **not** collapsed. VIF > 10 → flag only, never drop (§9).
+- **Compute:** the native pairwise metric per feature pair, chosen by the pair's types and normalized to **[0, 1]** so 0.95 means the same thing everywhere — then connected components on edges ≥ 0.95:
+  - numeric ↔ numeric → **|Spearman ρ|**
+  - numeric ↔ categorical (incl. binary) → **correlation ratio η** (§17.9)
+  - categorical ↔ categorical → **Bergsma's Cramér's V** (§17.1); binary ↔ binary is its 2×2 case (|phi|)
+  - ordinal involved → **|Spearman| / |Kendall τ|**
+  VIF, if reported, is computed among the **kept numeric** features only.
+- **Decide & record:** within each connected component keep the deterministic representative (highest Part-F effect, ties broken by fewer missing, then name order). Others → `redundant`, with the representative recorded. Pairs in **0.70–0.95** → `review` (redundancy-review band), **not** collapsed. VIF > 10 → flag only, never drop (§9).
 - **Gate `G`:** every kept feature is either unique or a representative; each `redundant` names its representative.
 
 ### Part H — Verdict  *(assemble)*
 - **Purpose:** what we hand over, and why.
-- **Run:**
-  1. `dsp.leakage.adjudicate(ctx)` — resolve the whole leak register at once (§13). Each surviving leak → `leak-suspect` with its detector and type.
-  2. `dsp.boruta.crosscheck(ctx)` — the all-relevant safety net (§16). Anything Boruta confirms that the filter dropped → re-flag to `review`.
-  3. `dsp.verdict.ledger(ctx)` — assign the final verdict + reason per column.
-  4. `dsp.verdict.handoff(ctx)` — the human summary.
-- **Gate `H`:** every column has exactly one verdict and a non-empty reason; leak register fully adjudicated; drop-rate-per-rule logged (§9).
+- **Compute:** the accumulated leak register (§12); the Boruta cross-check (§16) — fit Boruta on surviving **and** dropped features.
+- **Decide & record:** adjudicate each leak signal once, as a batch → `leak-suspect` (with detector + type); re-flag anything Boruta confirms that you dropped → `review`; give **every** column its final verdict + a non-empty reason. Log the drop-rate per rule (§9.3).
+- **Document:** the closing section (§14.1).
+- **Gate `H`:** every column has exactly one verdict and a non-empty reason; leak register fully adjudicated; drop-rate per rule logged.
 
 ---
 
@@ -263,15 +228,15 @@ Each part below: **purpose → run → decide → leak detectors that fire here 
 
 | Feature ↓ / Target → | **Binary** | **Multiclass** | **Ordinal** | **Regression** | **Survival** |
 |---|---|---|---|---|---|
-| **Continuous** | Single-feature **AUC** + Cliff's δ; `x_stat−c_stat` for non-monotone | OvR AUC / **Kruskal–Wallis η²** | **Spearman ρ** | **Spearman ρ** (+ Pearson) | **Univariate Cox** (HR, p, C-index) |
-| **Count** | Split: `is_zero` (AUC) **+** Spearman on positives (hurdle) | KW η² on positives + `is_zero` | Spearman | Spearman + `is_zero` | Cox on count **+** `is_zero` |
-| **Nominal** | **IV / WoE** (optbinning) + **Cramér's V** (Bergsma) | **Cramér's V** (Bergsma) | Cramér's V + KW | **Correlation ratio η²** / KW | Cox w/ dummies / **log-rank** |
+| **Continuous** | Single-feature **AUC** + Cliff's δ; `x_stat−c_stat` for non-monotone | OvR AUC / **Kruskal–Wallis ε²** | **Spearman ρ** | **Spearman ρ** (+ Pearson) | **Univariate Cox** (HR, p, C-index) |
+| **Count** | Split: `is_zero` (AUC) **+** Spearman on positives (hurdle) | KW ε² on positives + `is_zero` | Spearman | Spearman + `is_zero` | Cox on count **+** `is_zero` |
+| **Nominal** | **IV / WoE** (optbinning) + **Cramér's V** (Bergsma) | **Cramér's V** (Bergsma) | Cramér's V + KW ε² | **Correlation ratio η²** / KW ε² | Cox w/ dummies / **log-rank** |
 | **Ordinal** | IV (monotone bins) + Cramér's V; Kendall τ *diagnostic only* | Cramér's V | **Spearman / Kendall τ** | Spearman | Cox (ordinal as numeric + as factor) |
 | **Binary** | **IV** / phi / Cramér's V (2×2) | Cramér's V | Cliff's δ / Mann–Whitney | **point-biserial** / Cliff's δ | Cox / log-rank |
-| **High-card categorical** | **cross-fold IV** (mean over folds) + Bergsma V | Bergsma V (bias-corrected) | cross-fold IV | cross-fold **target-encoded η²** (bias-corrected) | Cox w/ cross-fold encoding |
+| **High-card categorical** | **cross-fold IV** (mean over folds) + Bergsma V | Bergsma V (bias-corrected) | cross-fold IV | cross-fold **target-encoded η²** (out-of-fold, §17.3) | Cox w/ cross-fold encoding |
 | **Datetime** | **Derive first** (see below), then route each derivative by its own type | ← | ← | ← | ← |
 
-**Datetime is never tested raw.** Derive (year, month, day-of-week, hour, is_weekend, days-since-epoch, cyclical sin/cos, recency-to-reference), then route each derivative through the table. Testing a raw epoch is meaningless.
+**Datetime is never tested raw.** Derive (year, month, day-of-week, hour, is_weekend, days-since-epoch, cyclical sin/cos, recency-to-reference), then route each derivative through the table. Testing a raw epoch is meaningless. (This limited, mechanical derivation is the one exception to "no feature engineering," §16 — you still do not invent new business features.)
 
 **Ordinal asymmetry:** nominal is the fallback. Treating ordinal as nominal loses power (still valid). Treating nominal as ordinal produces a *meaningless number* nothing catches. **The ordinal metric (Kendall τ) may never trigger an auto-drop** — it is diagnostic only. Resolve ordinal vs nominal by: value lexicon (`low/medium/high`) → name heuristic → compute both and let the comparison be the diagnostic.
 
@@ -305,6 +270,8 @@ Each part below: **purpose → run → decide → leak detectors that fire here 
 | Drift | PSI | > 0.25 | 0.1 moderate / 0.25 significant |
 | Viability floor | positives | < 50 total, < 10/fold | halt / small-n |
 
+**Viability floor by target type:** **classification** < 50 positives (minority class); **survival** < 50 events; **regression** effective_n < 100 (§10, §7 B).
+
 ### 9.1 Cardinality-dependent Cramér's V floors
 A flat floor silently kills real small effects on any categorical with > 3 levels. Cohen's benchmark divides by √(min(r,c) − 1); auto-drop is set one tier below "small":
 
@@ -323,10 +290,10 @@ A flat floor silently kills real small effects on any categorical with > 3 level
 Zero variance · > 98% single value · > 95% missing · exact duplicate column · identifier. These become `structural-drop` immediately in Part C.
 
 ### 9.3 Log the drop-rate per rule on every run
-**This is the primary calibration signal.** If a rule kills 40% of columns, either the data has no signal or the rule is too aggressive — only watching counts across several real datasets says which. `dsp` writes this to the run's decision card.
+**This is the primary calibration signal.** If a rule kills 40% of columns, either the data has no signal or the rule is too aggressive — only watching counts across several real datasets says which. Record it in the closing notebook section.
 
 ### 9.4 Expected behavior (sanity check)
-On a 300-column dataset: ~100–150 auto-dropped (mostly structural — constants, IDs, duplicates, near-empty), 5–15 flagged suspicious, the rest ranked in a review band. A real reduction in what a human reads, without the tool making a single genuine judgment call.
+On a 300-column dataset: ~100–150 auto-dropped (mostly structural — constants, IDs, duplicates, near-empty), 5–15 flagged suspicious, the rest ranked in a review band. A real reduction in what a human reads — most of it from structural facts, not judgment calls.
 
 ---
 
@@ -334,19 +301,26 @@ On a 300-column dataset: ~100–150 auto-dropped (mostly structural — constant
 
 **Gate on effective sample *per test* (`effective_n` from Part B), not total rows.**
 
+**`effective_n` is the binding count for the test, not the row count:**
+- **Binary / multiclass / ordinal target** → the **smallest class count** among rows with a non-null target (the minority "events" are the constraint).
+- **Regression target** → the count of **non-null target rows**.
+- **Survival target** → the number of **events** (uncensored observations) — censored rows carry less information, so events are the binding resource (the events-per-variable logic).
+
+For a feature with missing values, its per-feature effective_n drops further to the rows where **both** the feature and the target are present (§7 F).
+
 | Effective n | Behavior |
 |---|---|
 | ≥ 100 | Full pipeline. |
 | 30–100 | 3 folds, raise floors, mark every verdict `reduced-power`. |
-| **< 30** | **Structural drops only. No statistical verdicts.** Say so in the output. |
+| **< 30** | **Structural drops only. No statistical verdicts.** Say so in the notebook. |
 
-Below 30, dropping a feature for AUC 0.51 on 60 rows is noise-driven vandalism dressed as rigor. The tool refuses.
+Below 30, dropping a feature for AUC 0.51 on 60 rows is noise-driven vandalism dressed as rigor. Refuse it.
 
 ---
 
 ## 11. Partition strategy — the decision tree
 
-Derived in Part E, never chosen by the agent:
+You determine the split in Part E from the rule below — not by preference. Grain + time presence decide it; then freeze the folds:
 
 1. **Usable date column present** → time-based split (train on past, validate on future). Check for window overlap.
 2. **Repeating entity id (grain coarser than the row)** → grouped K-fold; an entity never appears in two folds.
@@ -380,21 +354,25 @@ Detectors need inputs from different stages, so leakage **accumulates across par
 | Effect above fixed leak backstop (§9) | F | direct |
 | Perfect/near-perfect separation | F | direct |
 
-**Outlier-based detection is primary; fixed thresholds are backstops.** Where the best honest feature reaches 0.62, an 0.80 is glaring; where several legitimately reach 0.82, it isn't.
+**Outlier-based detection is primary; fixed thresholds are backstops.** Where the best honest feature reaches 0.62, an 0.80 is glaring; where several legitimately reach 0.82, it isn't. (Modern practice agrees: a feature with absurdly high importance relative to its peers is the first sign of a label proxy.)
 
 ---
 
-## 13. Structural error awareness (what the tool cannot catch)
+## 13. Structural error awareness (what this cannot catch)
 
-Stated in the output so nobody over-trusts the run:
+State these in the notebook so nobody over-trusts the run:
 - **Part A silent errors** (§7 Part A) — wrong grain, ambiguous negatives, prediction-time = event-time, survivorship, target drift. No statistic reaches these; they are contradictions between the data and the world.
 - **Interaction blindness** — filter selection is blind to features that are weak alone but strong together (XOR; dose÷weight; lat+long; income+debt). Feature-feature correlation gives **no** information about this. Mitigations: `drop` never deletes; ask for domain ratios at Part A; Boruta cross-check at H. **Narrows the gap; does not close it.**
 
 ---
 
-## 14. The ledger — output contract
+## 14. The deliverable — a documented notebook
 
-One row per column. This *is* the deliverable.
+The deliverable is the **documented results notebook** you build: a section per part (§3.1), ending with the **ledger** — one row per column. Together they are the report a data scientist reads top to bottom.
+
+**Section convention:** each part's section has a heading (`A · Frame` … `H · Verdict`), a short prose paragraph on what you found and why, then the tables and figures behind it. **Derived datetime features** (§8) get their own ledger rows, named for the derivation (e.g. `signup_date__dow`).
+
+Record every column with these fields:
 
 | Field | Description |
 |---|---|
@@ -406,7 +384,7 @@ One row per column. This *is* the deliverable.
 | `effect_ci` | Confidence interval. |
 | `q_value` | BH-FDR-corrected. |
 | `shadow_floor` | The permutation bar it was compared against. |
-| `shape_gap` | `x_stat − c_stat` (non-monotone signal). |
+| `shape_gap` | `x_stat − c_stat` (non-monotone signal; binary target, else blank). |
 | `fold_spread` | Stability across folds. |
 | `redundant_with` | Representative column, if `redundant`. |
 | `leak_flag` | Detector + taxonomy type, if any. |
@@ -414,19 +392,20 @@ One row per column. This *is* the deliverable.
 | `rank_within_type` | Position within its feature type. |
 | `power_flag` | `reduced-power` if §10 applied. |
 
-Written as parquet + JSONL. Every `drop`/`redundant`/`structural-drop` row **stays** — the audit trail answers "why isn't `region` in the model?" in three months without reopening a notebook.
+Also save the ledger as a file (parquet or CSV). Every `drop`/`redundant`/`structural-drop` row **stays** — the audit trail answers "why isn't `region` in the model?" three months later.
 
-### 14.1 Handoff summary (human-facing)
-`dsp.verdict.handoff` produces: counts per verdict, drop-rate per rule (§9.3), the top-N `keep` within each feature type, every `leak-suspect` with its reason, every `engineer` candidate, and an explicit **limits** note (§13). It states plainly what the tool did **not** decide.
+### 14.1 Closing section (Part H)
+At H, add the closing notebook section: counts per verdict, drop-rate per rule (§9.3), the top-N `keep` within each feature type, every `leak-suspect` with its reason, every `engineer` candidate, and an explicit **limits** note (§13). State plainly what the tool did **not** decide.
 
 ---
 
 ## 15. Stop conditions
 
-The agent halts and reports (never guesses past) when:
+Halt and report (never guess past) when:
 - A gate fails (§4.5) — report which exit condition and why.
-- Viability floor unmet (§9) and small-n ladder says stop (§10).
-- A required statistic is missing from `dsp` (§1) — stop, name it, ask the user.
+- Viability floor unmet (§9) and the small-n ladder says stop (§10).
+- The guide does not specify how to measure something you need (§1) — stop, name it, ask the user. Do not invent a method.
+- Your code cannot compute a required statistic correctly (e.g. a library errors on the data and you cannot get a valid result) — report it, don't paper over it.
 - Part A cannot resolve target/grain even after the ≤2 questions — escalate to the human; do not assume.
 
 ---
@@ -434,13 +413,15 @@ The agent halts and reports (never guesses past) when:
 ## 16. What this tool is not
 
 - **Not an auto-selector.** It produces a ranked, reasoned *shortlist*; the human decides (§2). Building it to silently pick the final set contradicts the design.
-- **Not a model.** No modeling, no feature engineering (only `engineer` *flags*).
+- **Not a model.** No modeling, no feature engineering (only `engineer` *flags*, plus the mechanical datetime derivation of §8).
 - **Not a claim of better accuracy.** The honest value is **human hours saved, leakage caught early, reduced pipeline cost, and an audit trail** — not better models.
 - **Boruta at H is a safety net, not a selection method.** It answers one question: *did the filter throw away anything you'd have used?*
 
 ---
 
-## 17. Metric definitions (so `dsp` and the agent agree exactly)
+## 17. Metric definitions — the math you implement
+
+Implement these exactly. Where a library computes it (optbinning for WoE/IV, lifelines for Cox/C-index, statsmodels for VIF/FDR), prefer the library; where you compute by hand, use these formulas verbatim.
 
 ### 17.1 Bergsma bias-corrected Cramér's V
 For an r×c contingency table with Pearson χ² and sample size n, let φ² = χ²/n:
@@ -469,12 +450,13 @@ IV = Σ_bins (%good − %bad) · WoE, WoE = ln(%good / %bad). Computed with `opt
 | 0.3–0.5 | Strong |
 | **> 0.5** | **Suspicious — double-check for leakage** (feeds §12) |
 
-For high-cardinality categoricals, use **cross-fold IV** (mean over folds) to counter overfit inflation.
+For **high-cardinality** categoricals, compute IV / target-encoding **out-of-fold**: category statistics from the training folds only, applied to the held-out fold, so no row uses its own target. Report the **mean over folds**. This counters the overfit inflation that makes a high-cardinality noise column look predictive.
 
 ### 17.4 Cliff's δ (non-parametric effect, binary target vs continuous)
-Proportion of non-overlap between the two groups' distributions, range −1..1.
+Proportion of non-overlap between the two groups' distributions. For groups X (size m) and Y (size n):
+**δ = (1/(m·n)) · Σ_{i,j} sign(x_i − y_j)**, range −1..1; ties shrink |δ|.
 
-| |δ| | Effect |
+| \|δ\| | Effect |
 |---|---|
 | < 0.147 | Negligible (**auto-drop backstop 0.07, one tier below**) |
 | 0.147–0.33 | Small |
@@ -482,16 +464,34 @@ Proportion of non-overlap between the two groups' distributions, range −1..1.
 | ≥ 0.474 | Large |
 
 ### 17.5 Shadow-permutation floor
-Permute the column (wiping the feature↔target relationship, preserving the marginal), recompute the *same* native metric, repeat B times; the floor is a high percentile (start permissive — the percentile is an open tuning item) of the shadow distribution. A feature must clear **its own** shadow floor, which automatically rises for high-cardinality noise columns.
+Permute the column (wiping the feature↔target relationship, preserving the marginal), recompute the *same* native metric, repeat B times (e.g. B ≥ 50); the floor is a **high percentile of the shadow distribution** — start at the **95th** (Boruta's convention) and treat the percentile as an open tuning item. A feature must clear **its own** shadow floor, which automatically rises for high-cardinality noise columns. Use a fixed seed so the floor is reproducible.
 
 ### 17.6 Benjamini-Hochberg FDR
-Across all features tested in F, convert p-values to **q-values** controlling the false-discovery rate. A feature's q-value is reported in the ledger; used with (not instead of) effect size — significance without a clearing effect is still `review`, not `keep`.
+Across the m features tested in F, sort p-values ascending p₍₁₎ ≤ … ≤ p₍ₘ₎. The q-value at rank k is
+**q₍ₖ₎ = min( 1, min_{j ≥ k} ( m · p₍ⱼ₎ / j ) )** — i.e. compute m·p₍ₖ₎/k, then enforce monotonicity from rank m down to 1. Report q per feature. Use it **with** (not instead of) effect size — significance without a clearing effect is still `review`, not `keep`. (`statsmodels.stats.multitest.multipletests(method="fdr_bh")`.)
 
 ### 17.7 Population Stability Index (drift)
 PSI = Σ (%actual − %expected) · ln(%actual / %expected) across bins. < 0.10 stable · 0.10–0.25 moderate · **> 0.25 significant drift** → flag.
 
 ### 17.8 C-index (survival discrimination)
-Fraction of comparable pairs correctly ranked; 0.5 = random, 0.7–0.8 good, > 0.8 excellent *for a whole model*. So a **single feature** at C-index > 0.75 is a screaming leak (§9). Auto-drop backstop 0.55. Biased upward above ~40% censoring — report censoring alongside.
+Fraction of comparable pairs correctly ranked; 0.5 = random, 0.7–0.8 good, > 0.8 excellent *for a whole model*. So a **single feature** at C-index > 0.75 is a screaming leak (§9). Auto-drop backstop 0.55. Biased upward above ~40% censoring — report censoring alongside. (`lifelines`.)
+
+### 17.9 Correlation ratio η² (nominal/categorical → continuous)
+Proportion of a continuous target's variance explained by group membership; captures **nonlinear** separation Pearson misses.
+**η² = SS_between / SS_total = Σ_g n_g (ȳ_g − ȳ)² / Σ_i (y_i − ȳ)²**, range 0–1 (η = √η²). Use for a nominal feature against a regression target.
+
+### 17.10 Kruskal–Wallis effect size (rank-based, robust)
+From the Kruskal–Wallis H statistic over k groups, n total:
+- **ε² = H / (n − 1)** — recommended (not bias-corrected).
+- η²_H = (H − k + 1) / (n − k) — bias-corrected alternative.
+
+Bands (both): 0.01–0.06 small · 0.06–0.14 moderate · ≥ 0.14 large. Use for nominal/multiclass associations on ranks (non-normal, outlier-robust). Report ε².
+
+### 17.11 Point-biserial r_pb (binary feature → continuous target)
+**r_pb = ((ȳ₁ − ȳ₀) / s_y) · √(p₁ · p₀)**, where p₁, p₀ are the group proportions and s_y the target's SD. Numerically identical to Pearson r with the binary coded 0/1, so `scipy.stats.pointbiserialr` (or Pearson on the 0/1 column) is exact.
+
+### 17.12 Confidence intervals — one uniform method for every metric
+Use a **bootstrap percentile** CI so every effect — AUC, IV, Cramér's V, Spearman, Cliff's δ, η², C-index — is comparable. Resample the usable training rows (feature **and** target present) with replacement **B = 1000** times, recompute the metric each time, and take the **2.5th and 97.5th percentiles** as the 95% CI. Fix the seed. This is the effect's own uncertainty; **fold spread** (§7 F) is the separate cross-fold stability signal — report both.
 
 ---
 
@@ -499,11 +499,20 @@ Fraction of comparable pairs correctly ranked; 0.5 = random, 0.7–0.8 good, > 0
 
 - Bergsma, *A bias-correction for Cramér's V and Tschuprow's T* — [stats.lse.ac.uk](https://stats.lse.ac.uk/bergsma/pdf/cramerV3.pdf); formula confirmed via [Cramér's V, Wikipedia](https://en.wikipedia.org/wiki/Cram%C3%A9r's_V)
 - Lund, *Information Value Statistic and Predictors for Logistic Regression* (ASA 2014) — [amstat.org](https://ww2.amstat.org/meetings/proceedings/2014/data/assets/pdf/313981_87373.pdf)
-- Boruta all-relevant selection / shadow features — [CRAN Boruta](https://cran.r-project.org/web/packages/Boruta/Boruta.pdf)
-- Cliff's δ thresholds — [effsize, CRAN](https://cran.r-project.org/web/packages/effsize/effsize.pdf)
+- Boruta all-relevant selection / shadow features / 95th-percentile rule — [CRAN Boruta](https://cran.r-project.org/web/packages/Boruta/Boruta.pdf), [boruta_py process](https://deepwiki.com/scikit-learn-contrib/boruta_py/2.2-feature-selection-process)
+- Cliff's δ thresholds & formula — [effsize, CRAN](https://cran.r-project.org/web/packages/effsize/effsize.pdf), [rcompanion cliffDelta](https://rdrr.io/cran/rcompanion/man/cliffDelta.html)
 - Information Value bands (Siddiqi) — [listendata](https://www.listendata.com/2015/03/weight-of-evidence-woe-and-information.html)
+- Out-of-fold target encoding (leakage-safe) — [scikit-learn TargetEncoder](https://scikit-learn.org/stable/modules/preprocessing.html#target-encoder), [Hasz](https://brendanhasz.github.io/2019/03/04/target-encoding)
 - Population Stability Index thresholds — [listendata](https://www.listendata.com/2015/05/population-stability-index.html)
 - VIF rule of thumb & caution — [Springer, O'Brien 2007](https://link.springer.com/article/10.1007/s11135-006-9018-6)
 - Liberal univariate Cox screening (p < 0.20–0.25) — [Lasso-Cox, jsurvival](https://www.serdarbalci.com/jsurvival/articles/09-lassocox-comprehensive.html)
 - C-index interpretation — [scikit-survival](https://scikit-survival.readthedocs.io/en/stable/user_guide/evaluating-survival-models.html)
+- Correlation ratio η² — [statology](https://www.statology.org/correlation-between-continuous-categorical-variables/)
+- Kruskal–Wallis effect size (ε² / η²) — [rcompanion](https://rcompanion.org/handbook/F_08.html), [rstatix](https://rpkgs.datanovia.com/rstatix/reference/kruskal_effsize.html)
+- Point-biserial correlation — [scipy](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.pointbiserialr.html)
+- Benjamini–Hochberg FDR q-values — [statology](https://www.statology.org/benjamini-hochberg-procedure/)
+- Bootstrap percentile confidence intervals — [Machine Learning Mastery](https://machinelearningmastery.com/calculate-bootstrap-confidence-intervals-machine-learning-results-python/)
+- Events-per-variable rule (10 EPV, and relaxing it) — [Vittinghoff & McCulloch, AJE 2007](https://academic.oup.com/aje/article/165/6/710/63906)
+- Pairwise / available-case deletion for associations — [Statistics Solutions](https://www.statisticssolutions.com/missing-data-listwise-vs-pairwise/)
+- Mixed-type association method selection — [smartcor](https://arxiv.org/html/2607.22285)
 - optbinning (IV/WoE/Gini) — [optbinning docs](https://gnpalencia.org/optbinning/)
