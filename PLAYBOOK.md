@@ -1,17 +1,17 @@
 # Feature Selection Playbook — a guide for Claude Code
 
-**Status:** v2 — locked 2026-08-13
+**Status:** v3 — locked (agent + `fsp` tools; in sync with the built package)
 
-You are Claude Code. Handed a path to a single dataframe, you run the whole feature-selection screening yourself: you **write and run the code**, part by part, and produce a **documented notebook** — a ranked, reasoned shortlist with a verdict and a reason for every column. A human still makes the final feature decision (§16).
+You are Claude Code. Handed a path to a single dataframe, you run the whole feature-selection screening: for each part you **call the `fsp` tools** for the deterministic work and **write code** where judgment or adaptation is needed, then produce a **documented notebook** — a ranked, reasoned shortlist with a verdict and a reason for every column. A human still makes the final feature decision (§16).
 
-This document is the **guide**, not a library. It gives you the **method** (what to do, in what order), the **rules and thresholds** (how to decide), and the **exact math** (§17, so your code is correct). You supply the code and the judgment. There is no `dsp` package — you use ordinary libraries (pandas, numpy, scipy, scikit-learn, statsmodels, lifelines, optbinning, matplotlib, nbformat) and write the analysis yourself.
+This document is the **guide**: the **method** (what to do, in what order), the **rules and thresholds** (how to decide), and the **exact math** (§17). Its companion is the **`fsp` package** (catalogued in [`TOOLS.md`](TOOLS.md)), which implements the deterministic work — the §17 math, structural checks, folds, ledger, notebook, and gates. **Call `fsp` for those; never re-derive them.** You own the framing, the judgment (verdicts), adaptation to messy data, and the notebook narrative.
 
 ---
 
 ## 0. How to read this document
 
 - You run **Parts A–H** in order, each as the same four-step loop (§3.1): **compute → decide → document → verify.**
-- **You write the code.** The *methods, thresholds, and formulas* come from this guide — never improvised (§1).
+- **Compute with `fsp`, decide yourself.** The deterministic work is `fsp` tools (it implements §9/§17 exactly); the judgment is yours. Never re-derive a metric `fsp` provides or improvise a method the guide doesn't define (§1).
 - Each part ends at a **gate** (§4.5): a self-check you must pass before moving on. If it fails, **stop**.
 - The **deliverable is a documented notebook** that you grow one section per part (§14). The per-column **ledger** is its final section.
 - The numbers you must not invent are in the **Thresholds** table (§9); the formulas you must implement exactly are in **Metric definitions** (§17). Both are sourced.
@@ -20,23 +20,24 @@ This document is the **guide**, not a library. It gives you the **method** (what
 
 ## 1. Prime directive
 
-> **You write and run the code. But the methods, thresholds, and formulas come from this guide — never improvised. If this guide doesn't specify how to measure something, STOP and ask the user; do not invent a method.**
+> **Call `fsp` for the deterministic work; write code only for framing, judgment, adaptation, and narrative. Never re-implement a metric `fsp` provides, never hardcode a number the guide fixes, and if the guide doesn't specify how to measure something, STOP and ask the user — do not invent a method.**
 
-Why this is absolute: the value of a screening tool is that runs are **comparable** — same tests, same thresholds, same output shape, across every dataset and project. If you improvise methods or numbers, that comparability is lost and the thresholds below become meaningless (they were chosen against the exact definitions in §17). The guide fixes the **what** and the **numbers**; you own the **how** (the code) and adapt it to the data in front of you.
+Why this is absolute: the value of a screening tool is that runs are **comparable** — same tests, same thresholds, same output shape, across every dataset and project. If you improvise methods or numbers, that comparability is lost and the thresholds below become meaningless (they were chosen against the exact definitions in §17). The guide fixes the **what** and the **numbers**, `fsp` fixes the **how** for the deterministic parts, and you own the **judgment** and the adaptation to the data in front of you.
 
 Corollary rules:
-- **Use the exact numbers in §9 and formulas in §17.** Do not hardcode a different threshold or a rougher approximation of a metric.
+- **Use `fsp` for §9 numbers and §17 formulas** (`fsp.thresholds`, `fsp.metrics`). Do not hardcode a threshold or re-implement (or roughly approximate) a metric `fsp` already computes.
 - **No per-feature target-association statistic before the folds exist (Part E).** Only Part B's aggregate viability facts and Part D's missingness-leak diagnostic may touch the target earlier. See §4.4 edge 3 — the most-violated, least-noticed rule.
 - **Every drop stays in the ledger.** `drop` means "excluded from the first model," never "deleted."
 
 ---
 
-## 2. Three roles
+## 2. Four roles
 
 | Role | Who | Responsibility |
 |---|---|---|
-| **Brain + hands** | You (Claude Code) | Read this guide, **write and run the code** for each part, **make every decision** (frame, semantic type, drop/keep, verdicts) using the rules here, document each step in the notebook, and self-check the gate. Adapt the code to the data; fix your own errors. Ask the human the ≤2 questions at Part A. |
-| **The guide** | This document | Fixes the method, order, decision rules, thresholds (§9), and exact math (§17). The single source of truth for *what* and *how much* — never *what code*. |
+| **Brain** | You (Claude Code) | Read this guide, **make every decision** (frame, semantic type, drop/keep, verdicts), orchestrate the parts, write code for adaptation and the notebook narrative, and self-check the gate. Ask the human the ≤2 questions at Part A. |
+| **Body** | The **`fsp`** package | Does the deterministic work — the §17 math, structural checks, folds, ledger, notebook, gates. Computes and reports; **never makes a judgment call.** Deterministic and reproducible. |
+| **Guide** | This document | Fixes the method, order, decision rules, thresholds (§9), and exact math (§17). The source of truth for *what* and *how much*. |
 | **Decider** | The human | Reviews the notebook, applies domain knowledge the data cannot contain, makes the final feature decision. Confirms Part A (the one mandatory-human step). |
 
 ---
@@ -45,9 +46,9 @@ Corollary rules:
 
 ```
 A Frame ──▶ B Viability ──▶ C Inventory ──▶ D Value integrity ──▶ E Partition ──▶ F Relevance+stability ──▶ G Redundancy ──▶ H Verdict
-  (no target)  (target)       (no target)     (partly target)       (no target)     (target, train folds)      (no target)     (assemble)
+  (no target)  (target)       (no target)     (partly target)       (no target)     (target, split frozen)     (no target)     (assemble)
    config       strictness     semantic         sentinels,            frozen           effect+CI+q+shape+         components+     ledger with
-   object       tier           types +          missingness           folds            fold-spread               reps           reason/feature
+   object       tier           types +          missingness           split            fold-spread               reps           reason/feature
                                structural        clusters
                                drops
                                     │                │                                        │
@@ -64,10 +65,10 @@ Every part is the **same four steps.** This is the core of how you work:
 
 | Step | You do | With |
 |---|---|---|
-| **1. Compute** | Write and run code to produce the facts/statistics this part needs. Use the **exact method** from §8/§17. | pandas, scipy, sklearn, statsmodels, lifelines, optbinning |
-| **2. Decide** | Apply this guide's **rules and thresholds** (§5, §8, §9) to the numbers. This is your judgment. | §5 verdicts, §8 dispatch, §9 thresholds |
-| **3. Document** | Append a written section to the live notebook — prose explaining what you found and why, plus the tables and figures behind it. | nbformat / matplotlib |
-| **4. Verify** | Check the part's **gate conditions** (§7). If any fails, **stop** and report — do not proceed. | §4.5, §15 |
+| **1. Compute** | Call the `fsp` tool for this part's facts/statistics (it uses the exact §8/§17 method). Write code only to adapt to messy data. | `fsp.metrics`, `fsp.parts.*` |
+| **2. Decide** | Apply this guide's **rules and thresholds** (§5, §8, §9) to the numbers. This is your judgment. | §5 verdicts, §8 dispatch, `fsp.thresholds` |
+| **3. Document** | Append a written section to the live notebook — your prose plus the tables and figures behind it. | `fsp.notebook`, `fsp.report` |
+| **4. Verify** | Check the part's **gate conditions** (§7). If any fails, **stop** and report — do not proceed. | `fsp.gate` |
 
 Two habits that make this trustworthy:
 - **Document as you go, not at the end.** The notebook is written incrementally so a human can watch the analysis unfold and audit each step.
@@ -98,7 +99,7 @@ For every feature, compare its effect against the effect achievable at random �
 4. **F before G.** Representative selection needs effect sizes.
 
 ### 4.5 Gates are self-checks, not suggestions
-Each part ends with explicit **exit conditions** (§7). Before you move on, verify them in code and state the result in the notebook. If a condition fails, **stop the run and report which one and why** (§15). "Do not proceed without X" is a hard stop you enforce on yourself — not a soft guideline.
+Each part ends with explicit **exit conditions** (§7). Before you move on, verify them with `fsp.gate` and state the result in the notebook. If a condition fails, **stop the run and report which one and why** (§15). "Do not proceed without X" is a hard stop you enforce on yourself — not a soft guideline.
 
 ### 4.6 Outputs — what every part leaves behind
 - **A notebook section** (§14): prose + the tables and figures behind your decisions, appended live.
@@ -126,7 +127,7 @@ Every column exits with exactly one verdict in the ledger:
 
 ## 6. What each part must produce
 
-There is no fixed API — you write the code. For each part you **compute** the left column, **decide** using the rules, **record** the result in the ledger/notebook, and **verify** the gate. This table is the contract at a glance; §7 is the detail.
+For each part you **compute** the left column (call the `fsp` tools — see [`TOOLS.md`](TOOLS.md) for the API), **decide** using the rules, **record** the result in the ledger/notebook, and **verify** the gate. This table is the contract at a glance; §7 is the detail.
 
 | Part | You compute | You decide | You record | Gate check |
 |---|---|---|---|---|
@@ -135,7 +136,7 @@ There is no fixed API — you write the code. For each part you **compute** the 
 | **C** Inventory | per-column dtype, cardinality, %missing, uniqueness, duplicate map | semantic type (§8) per column; structural drops (§9.2) | type + verdict per column | every column has a semantic type |
 | **D** Value integrity | sentinel candidates, distributions, missingness, co-missing clusters | which sentinels are real; `engineer` flags | sentinel register; nulled sentinels | sentinels nulled; missingness mapped |
 | **E** Partition | grain + time presence | split strategy (§11) and k | frozen fold indices to disk | folds exist before any F statistic |
-| **F** Relevance + stability | per §8 dispatch, on train folds only: effect, CI, q-value, shape gap, fold spread, shadow floor | `keep`-eligible / `drop` / `review` per §9 | metrics + verdict per feature | every non-structural column has metrics + a decision |
+| **F** Relevance + stability | per §8 dispatch, once the split is frozen: effect, CI, q-value, shape gap, fold spread, shadow floor | `keep`-eligible / `drop` / `review` per §9 | metrics + verdict per feature | every non-structural column has metrics + a decision |
 | **G** Redundancy | pairwise native metric; components at ≥ 0.95 | representative per component; `review` for 0.70–0.95 | `redundant_with` links | every kept feature is unique or a representative |
 | **H** Verdict | leak signals (§12); Boruta cross-check (§16) | adjudicate leaks; final verdict + reason for every column | final ledger; closing section | every column has exactly one verdict + a non-empty reason |
 
@@ -143,12 +144,12 @@ There is no fixed API — you write the code. For each part you **compute** the 
 
 ## 7. Part-by-part procedure
 
-Each part follows the §3.1 loop. Below, per part: what to **compute**, what to **decide**, which **leak detectors** fire, and the **gate** to verify. Document each part in the notebook before you gate.
+Each part follows the §3.1 loop. Below, per part: what to **compute**, what to **decide**, which **leak detectors** fire, and the **gate** to verify. Each "Compute" step is provided by an `fsp` tool (see [`TOOLS.md`](TOOLS.md)) — call it rather than re-deriving. Document each part in the notebook before you gate.
 
 ### Part A — Frame  *(no target contact yet)*
 - **Purpose:** state what we are predicting, for whom, at what grain.
 - **Compute:** candidate targets, target class balance / dtype / cardinality, columns that parse as dates, columns that are unique-per-row or named like ids, whether any id repeats.
-- **Decide & record:** *you* choose the target, target type (one of §8's five), date column, id columns, and grain — each a **corrigible claim**. Ask the human only where the data genuinely cannot answer (0–2 questions).
+- **Decide & record:** *you* choose the target, target type (one of §8's five), date column, id columns, and grain — each a **corrigible claim**. Where **prediction time differs from the event/observation date**, also record a **prediction-time reference** (`reference_date`) — the moment a real prediction would be made — which the future-timestamp leak check uses (§12.2). Ask the human only where the data genuinely cannot answer (0–2 questions).
 - **Human checkpoint (mandatory):** This is the **only part with no automated error detector**. Detectable errors (non-unique keys, target nulls) get caught later; **silent errors** (wrong grain, ambiguous negatives, prediction-time = event-time, survivorship in the population, target drift) produce a flawless analysis of the *wrong question*. State every inference as a corrigible claim; record every assumption in the notebook.
 - **Leak detectors:** none yet.
 - **Gate `A`:** config recorded, target identified (or explicitly "no target"), grain stated in plain language.
@@ -170,7 +171,7 @@ Each part follows the §3.1 loop. Below, per part: what to **compute**, what to 
 - **Purpose:** which values are real, which absent, and why.
 - **Compute:** sentinel candidates (e.g. `-999`, `9999`, `""`, `"unknown"`), distributions (skew, zero-inflation, spikes), missingness rate, and **co-missing clusters** (columns that go missing together — correlate the null-masks, group at ≥ 0.95). Then **null the confirmed sentinels** (hard prerequisite for F, §4.4 edge 2).
 - **Decide & record:** confirm which sentinel candidates are real (corrigible). A co-missing cluster's *membership indicator* is often a better feature than any member — flag it `engineer`.
-- **Leak detectors:** **future timestamps** and **missingness-predicts-target** fire here. Report `missingness_predicts_target: AUC 0.71` — an honest measurement, **not** an `MNAR` label the data cannot support (Little's MCAR test is rejected — it assumes multivariate normality, is unreliable for categoricals, and breaks numerically above ~30 variables).
+- **Leak detectors:** **future timestamps**, **value-only-present-for-positives**, and **missingness-predicts-target** fire here. Report `missingness_predicts_target: AUC 0.71` — an honest measurement, **not** an `MNAR` label the data cannot support (Little's MCAR test is rejected — it assumes multivariate normality, is unreliable for categoricals, and breaks numerically above ~30 variables). *Implementation note:* in `fsp` the missingness-predicts-target scan is **fold-guarded** (it computes a target AUC), so it is registered right after Part E rather than mid-D — detection timing shifts, but adjudication is still batched at H, and edge-3 stays a hard error.
 - **Gate `D`:** all confirmed sentinels nulled; missingness map complete.
 
 ### Part E — Partition  *(no target values touched — only indices)*
@@ -179,9 +180,9 @@ Each part follows the §3.1 loop. Below, per part: what to **compute**, what to 
 - **Decide & record:** *you* pick the split from grain + time (§11), then **freeze fold indices to disk** so every later part reuses the identical split.
 - **Gate `E`:** folds frozen. **Nothing downstream may touch the target with a per-feature statistic until this gate passes** (§4.4 edge 3).
 
-### Part F — Relevance + stability  *(target — train folds only)*
+### Part F — Relevance + stability  *(target — split frozen)*
 - **Purpose:** does each feature relate to the target, reliably?
-- **Compute (per feature, on training folds only):** first derive any datetime feature into its parts and split any zero-inflated count into `is_zero` + positives (§8); then run the native test per feature type × target type (§8 dispatch), with:
+- **Compute (per feature, once the split is frozen — §4.4 edge 3):** the point estimate uses all available rows; the per-fold **test** effects give the stability spread, and genuinely out-of-fold scoring is used only where in-sample inflates (high-cardinality IV / target-encoding, §17.3). First derive any datetime feature into its parts and split any zero-inflated count into `is_zero` + positives (§8); then run the native test per feature type × target type (§8 dispatch), with:
   - **Effect size** on the native scale, labeled with its metric name.
   - **Confidence interval** on the effect — the uniform bootstrap-percentile method (§17.12).
   - **q-value** — Benjamini-Hochberg FDR across all features (§17.6).
@@ -260,6 +261,9 @@ Each part follows the §3.1 loop. Below, per part: what to **compute**, what to 
 | Auto-drop | Information Value | < 0.01 | one tier below Siddiqi's 0.02 "useless" |
 | Auto-drop | Spearman ρ | < 0.05 | one tier below weak |
 | Auto-drop | Cliff's δ | < 0.07 | one tier below 0.147 negligible |
+| Auto-drop | point-biserial \|r_pb\| | < 0.05 | one tier below 0.1 weak |
+| Auto-drop | correlation ratio η² | < 0.005 | one tier below 0.01 small (§17.9) |
+| Auto-drop | Kruskal–Wallis ε² | < 0.005 | one tier below 0.01 small (§17.10) |
 | Auto-drop | C-index (survival) | < 0.55 | 0.5 = random |
 | Auto-drop | Cramér's V | **cardinality-dependent** (below) | Cohen ÷ √(min(r,c)−1) |
 | Screening p | Cox (survival) | < 0.20 | liberal univariate Cox before LASSO |
@@ -354,6 +358,8 @@ Detectors need inputs from different stages, so leakage **accumulates across par
 | Effect above fixed leak backstop (§9) | F | direct |
 | Perfect/near-perfect separation | F | direct |
 
+The **prediction-time reference** for the future-timestamp check comes from Part A (`reference_date`); absent one, `date_col` is used as a weaker proxy — but event-time ≠ prediction-time (§7 A), so treat those hits as lower-confidence.
+
 **Outlier-based detection is primary; fixed thresholds are backstops.** Where the best honest feature reaches 0.62, an 0.80 is glaring; where several legitimately reach 0.82, it isn't. (Modern practice agrees: a feature with absurdly high importance relative to its peers is the first sign of a label proxy.)
 
 ---
@@ -405,6 +411,7 @@ Halt and report (never guess past) when:
 - A gate fails (§4.5) — report which exit condition and why.
 - Viability floor unmet (§9) and the small-n ladder says stop (§10).
 - The guide does not specify how to measure something you need (§1) — stop, name it, ask the user. Do not invent a method.
+- `fsp` lacks a tool for a deterministic step you need — stop and say so; do not hand-roll a metric that belongs in `fsp`.
 - Your code cannot compute a required statistic correctly (e.g. a library errors on the data and you cannot get a valid result) — report it, don't paper over it.
 - Part A cannot resolve target/grain even after the ≤2 questions — escalate to the human; do not assume.
 
@@ -419,9 +426,9 @@ Halt and report (never guess past) when:
 
 ---
 
-## 17. Metric definitions — the math you implement
+## 17. Metric definitions — the exact math (`fsp` implements it)
 
-Implement these exactly. Where a library computes it (optbinning for WoE/IV, lifelines for Cox/C-index, statsmodels for VIF/FDR), prefer the library; where you compute by hand, use these formulas verbatim.
+These are implemented and tested in **`fsp.metrics`** — call `fsp`, do not re-implement them. The formulas below are the exact spec `fsp` is validated against (and what you'd need to verify a result by hand). Internally `fsp` uses the standard libraries (optbinning for WoE/IV, lifelines for Cox/C-index, statsmodels for VIF/FDR).
 
 ### 17.1 Bergsma bias-corrected Cramér's V
 For an r×c contingency table with Pearson χ² and sample size n, let φ² = χ²/n:
@@ -435,7 +442,7 @@ Always use Ṽ (not raw V) for categorical association and for the §9.1 floors.
 
 ### 17.2 The x-statistic (Bruce Lund) and shape gap
 - **c-stat** = single-feature AUC (rank concordance of the raw feature vs a binary target).
-- **x-stat** = the c-statistic of a logistic regression on the **WoE-transformed, optimally-binned** feature (via `optbinning`).
+- **x-stat** = the c-statistic of a logistic regression on the **WoE-transformed** feature, binned into **quantile bins with no monotonic constraint** (via `optbinning`) so the WoE is free to be non-monotone and capture shape. (optbinning's own optimizer collapses a non-monotone feature to a single bin, which would defeat the purpose.)
 - **Proven property:** x-stat ≥ c-stat, with **equality iff the feature is monotone vs the target.**
 - **shape_gap = x_stat − c_stat** is exactly the signal a monotone metric discards. A U-shaped feature reads ~0.51 raw and ~0.68 binned → gap ≈ 0.17 → `review`/`engineer`, never auto-drop. Replaces mutual information entirely (MI has no natural scale and swings with the estimator).
 
@@ -450,7 +457,7 @@ IV = Σ_bins (%good − %bad) · WoE, WoE = ln(%good / %bad). Computed with `opt
 | 0.3–0.5 | Strong |
 | **> 0.5** | **Suspicious — double-check for leakage** (feeds §12) |
 
-For **high-cardinality** categoricals, compute IV / target-encoding **out-of-fold**: category statistics from the training folds only, applied to the held-out fold, so no row uses its own target. Report the **mean over folds**. This counters the overfit inflation that makes a high-cardinality noise column look predictive.
+For **high-cardinality** categoricals, compute IV / target-encoding **out-of-fold**: category statistics from the training folds only, applied to the held-out fold, so no row uses its own target. Report the **mean over folds**. This counters the overfit inflation that makes a high-cardinality noise column look predictive. (For a **regression** target the same out-of-fold encoding is scored as **η²** — the variance explained by the held-out category means; `fsp.metrics.iv_oof` and `target_encoded_eta_oof`.)
 
 ### 17.4 Cliff's δ (non-parametric effect, binary target vs continuous)
 Proportion of non-overlap between the two groups' distributions. For groups X (size m) and Y (size n):
@@ -464,11 +471,13 @@ Proportion of non-overlap between the two groups' distributions. For groups X (s
 | ≥ 0.474 | Large |
 
 ### 17.5 Shadow-permutation floor
-Permute the column (wiping the feature↔target relationship, preserving the marginal), recompute the *same* native metric, repeat B times (e.g. B ≥ 50); the floor is a **high percentile of the shadow distribution** — start at the **95th** (Boruta's convention) and treat the percentile as an open tuning item. A feature must clear **its own** shadow floor, which automatically rises for high-cardinality noise columns. Use a fixed seed so the floor is reproducible.
+Permute the column (wiping the feature↔target relationship, preserving the marginal), recompute the *same* native metric, repeat B times (e.g. B ≥ 50; `fsp` default 50); the floor is a **high percentile of the shadow distribution** — start at the **95th** (Boruta's convention) and treat the percentile as an open tuning item. A feature must clear **its own** shadow floor, which automatically rises for high-cardinality noise columns. Use a fixed seed so the floor is reproducible. **The same shadow draws also yield a permutation p-value** for any metric that lacks an analytic one (§17.6).
 
 ### 17.6 Benjamini-Hochberg FDR
 Across the m features tested in F, sort p-values ascending p₍₁₎ ≤ … ≤ p₍ₘ₎. The q-value at rank k is
 **q₍ₖ₎ = min( 1, min_{j ≥ k} ( m · p₍ⱼ₎ / j ) )** — i.e. compute m·p₍ₖ₎/k, then enforce monotonicity from rank m down to 1. Report q per feature. Use it **with** (not instead of) effect size — significance without a clearing effect is still `review`, not `keep`. (`statsmodels.stats.multitest.multipletests(method="fdr_bh")`.)
+
+**Every F metric must supply a p-value so it can get a q.** Where the metric has an analytic test, use it: **AUC → Mann–Whitney U** (§17.13, the exact companion test); Spearman/Kendall/point-biserial/Kruskal–Wallis carry their own; Cox its own. Where it does not — **IV, η², Cramér's V, Cliff's δ** — use a **one-sided permutation p** off the shadow draws (§17.5): **p = (1 + #{shadow ≥ effect}) / (B + 1)**. This closes the gap that would otherwise leave the primary binary metrics (AUC, IV) without a q-value.
 
 ### 17.7 Population Stability Index (drift)
 PSI = Σ (%actual − %expected) · ln(%actual / %expected) across bins. < 0.10 stable · 0.10–0.25 moderate · **> 0.25 significant drift** → flag.
@@ -491,7 +500,22 @@ Bands (both): 0.01–0.06 small · 0.06–0.14 moderate · ≥ 0.14 large. Use f
 **r_pb = ((ȳ₁ − ȳ₀) / s_y) · √(p₁ · p₀)**, where p₁, p₀ are the group proportions and s_y the target's SD. Numerically identical to Pearson r with the binary coded 0/1, so `scipy.stats.pointbiserialr` (or Pearson on the 0/1 column) is exact.
 
 ### 17.12 Confidence intervals — one uniform method for every metric
-Use a **bootstrap percentile** CI so every effect — AUC, IV, Cramér's V, Spearman, Cliff's δ, η², C-index — is comparable. Resample the usable training rows (feature **and** target present) with replacement **B = 1000** times, recompute the metric each time, and take the **2.5th and 97.5th percentiles** as the 95% CI. Fix the seed. This is the effect's own uncertainty; **fold spread** (§7 F) is the separate cross-fold stability signal — report both.
+Use a **bootstrap percentile** CI so every effect — AUC, IV, Cramér's V, Spearman, Cliff's δ, η², C-index — is comparable. Resample the usable training rows (feature **and** target present) with replacement **B = 1000** times, recompute the metric each time, and take the **2.5th and 97.5th percentiles** as the 95% CI. Fix the seed. (`fsp` uses B = 1000 for a standalone CI; its in-loop screening default is **200** for cost, exposed as a parameter.) This is the effect's own uncertainty; **fold spread** (§7 F) is the separate cross-fold stability signal — report both.
+
+### 17.13 Single-feature AUC (and its p-value)
+**AUC = P(x⁺ > x⁻)** over all positive/negative feature-value pairs — the rank concordance of feature `x` with a binary target; 0.5 = random, and we report it **orientation-free** as `max(a, 1−a)`. It equals the **Mann–Whitney U** statistic ÷ (m·n), so the Mann–Whitney U test gives its **exact p-value**. Auto-drop backstop 0.52 (§9); a single feature > 0.85 is a leak flag (§9, §12). This is the primary metric for continuous/count features vs a binary target (§8).
+
+### 17.14 Rank / linear correlations (Spearman, Kendall, Pearson)
+- **Spearman ρ** — Pearson correlation of the *ranks*; monotone-sensitive and outlier-robust. Reported with its t-based p; auto-drop 0.05.
+- **Kendall τ** — (concordant − discordant) pairs ÷ total; **diagnostic only, never triggers an auto-drop** (§8 ordinal asymmetry).
+- **Pearson r** — linear correlation; reported *alongside* Spearman for continuous↔continuous, never as the sole screen.
+
+### 17.15 Variance Inflation Factor (VIF)
+For numeric feature *j* regressed on the other kept numeric features, **VIF_j = 1 / (1 − R²_j)**. VIF > 10 ⇒ severe multicollinearity — **flag only, never a drop** (§9), and computed among the **kept numeric** features only. (`statsmodels`.)
+
+### 17.16 Univariate Cox and the log-rank test (survival)
+- **Univariate Cox** — a single-covariate proportional-hazards fit: report the hazard ratio **e^β**, its p (liberal screen at < 0.20, §9), and the model **C-index** (§17.8).
+- **Log-rank** — compares survival curves across the levels of a categorical feature; report the statistic and p. (`lifelines`.)
 
 ---
 
