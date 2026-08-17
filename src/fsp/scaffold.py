@@ -72,6 +72,15 @@ Do not batch-write the whole chain. Each run_<x> gets the ctx resumed from the
 previous part and returns it; touch only this part's notebook section (add_section
 rewrites just that one). Stash cross-part state on ctx.state (it is checkpointed),
 e.g. ctx.state["feature_types"] = {...} in run_c for run_f/run_g to reuse.
+
+RE-RUN SAFETY — a part's checkpoint stores the *mutated* ctx.df, and resume_run
+hands that mutated frame back. So re-running a part sees already-transformed data.
+Write every mutation to be idempotent, because some failures are silent: a blank
+detector re-run just finds 0 blanks (a gate may catch it), but
+`(df["col"] == "Yes").astype(int)` on an already-integer column silently sets every
+row to 0 — same shape, same dtype, no error, whole run meaningless. Guard before you
+transform (e.g. `if df["col"].dtype == object:`), or make the op a no-op the second
+time. When in doubt, re-run the *earlier* part to rebuild the frame from clean data.
 """
 
 import fsp  # noqa: F401

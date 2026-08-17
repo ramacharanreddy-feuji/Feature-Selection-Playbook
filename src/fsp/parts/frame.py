@@ -11,6 +11,10 @@ _DATE_HINTS = ("date", "time", "timestamp", "dt", "datetime")
 
 
 def target_candidates(df: pd.DataFrame) -> list[str]:
+    """Columns whose (lowercased) name is *exactly* a target hint. Exact match on
+    purpose — a substring rule would pull `class_id`, `y_pred`, `default_date` — so
+    `is_churn`/`churn_flag` won't surface here; Part A is a human checkpoint, so
+    confirm the target with the user, don't rely on this catching every phrasing."""
     return [c for c in df.columns if str(c).lower() in _TARGET_HINTS]
 
 
@@ -58,6 +62,12 @@ def date_candidates(df: pd.DataFrame) -> list[str]:
 
 
 def id_candidates(df: pd.DataFrame) -> list[str]:
+    """Id-*suggestions* for Part A: name-based (`id`/`*_id`) or all-unique, of any
+    dtype. Deliberately broader than inventory's `structural_flags`, which only
+    auto-drops an all-unique column as `identifier` when it is **not** float (an
+    all-unique float is usually a continuous measurement, not a key). So an
+    all-unique float shows up here for a human to confirm but is not structurally
+    dropped — the disagreement is intentional; Part A decides."""
     n = len(df)
     out = []
     for c in df.columns:

@@ -33,7 +33,13 @@ def name_signals(ctx: RunContext) -> None:
 
 
 def outlier_effects(ctx: RunContext, effects: Mapping[str, float]) -> None:
-    """Fire at F: an effect that is an outlier versus its peers (§12, primary)."""
+    """Fire at F: an effect that is an outlier versus its peers (§12, primary).
+
+    Pass effects from a **single metric family** — the MAD scan assumes one common
+    scale, so mixing AUC (~0.5–1.0) with IV (~0.0–0.05) in one call lets a cluster
+    of small IVs drag the median down and flag honest AUC features as leak-suspects.
+    Call it once per metric (as with `backstop_effects`, which takes that metric's
+    own threshold), not once over the merged dict."""
     vals = np.array([v for v in effects.values() if v is not None and v == v])
     if len(vals) < 5:
         return

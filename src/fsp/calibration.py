@@ -13,7 +13,16 @@ if TYPE_CHECKING:
 
 
 def drop_rate_by_rule(ledger: pd.DataFrame) -> dict[str, int]:
-    """Count how many columns each drop reason removed (§9.3)."""
+    """Count how many columns each drop reason removed (§9.3).
+
+    The key is the ledger `reason` truncated at the first parenthesis or quote, so
+    the **leading phrase is effectively the rule label** — write reasons as
+    ``"<stable rule name> (per-column detail: numbers…)"`` and columns dropped by
+    the same rule collapse to one key. Lead with the numbers instead
+    (``"IV 0.0004 below floor"``) and every column becomes its own key, making the
+    §9.3 calibration signal unusable. §14 asks the notebook prose for a
+    plain-language sentence; keep the rule name first and the specifics in parens to
+    satisfy both."""
     dropped = ledger[ledger["verdict"].isin(["drop", "structural-drop", "redundant"])]
     if dropped.empty:
         return {}

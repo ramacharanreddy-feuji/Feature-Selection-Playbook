@@ -76,3 +76,20 @@ def make_folds(
 def load_folds(run_dir: str | Path) -> Folds:
     """Reload the frozen split written by `make_folds(run_dir=...)` (§7 E)."""
     return Folds.load(Path(run_dir) / "folds.json")
+
+
+def fold_positive_counts(
+    folds: Folds, y: pd.Series | np.ndarray, *, positive_label: object = None
+) -> list[int]:
+    """Positives in each fold's held-out (test) block — the counts
+    `thresholds.per_fold_floor_met` checks (§9). The positive class defaults to the
+    minority level unless `positive_label` is given. `y` is positional (same order
+    as the rows the folds index), so it must not be pre-filtered."""
+    ys = pd.Series(np.asarray(y))
+    if positive_label is None:
+        vc = ys.dropna().value_counts()
+        if vc.empty:
+            return [0 for _ in folds.splits]
+        positive_label = vc.index[-1]  # minority class
+    pos = (ys == positive_label).to_numpy()
+    return [int(pos[te].sum()) for _, te in folds.splits]

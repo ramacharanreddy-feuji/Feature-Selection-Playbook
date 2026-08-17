@@ -32,12 +32,22 @@ def _pair_score(df: pd.DataFrame, a: str, b: str, ta: str, tb: str) -> float:
 
 
 def pairwise(df: pd.DataFrame, features: list[str], types: Mapping[str, str]) -> pd.DataFrame:
-    """Symmetric [0,1] similarity matrix over `features`."""
+    """Symmetric [0,1] similarity matrix over `features`.
+
+    A pair whose score cannot be computed — e.g. a column typed `ordinal` (→ numeric
+    → Spearman) that is actually string-valued (§8 permits falling back to `nominal`)
+    — scores 0 rather than raising, so a defensible typing choice at Part C never
+    detonates as an unrelated error here."""
     n = len(features)
     mat = np.eye(n)
     for i in range(n):
         for j in range(i + 1, n):
-            s = _pair_score(df, features[i], features[j], types[features[i]], types[features[j]])
+            try:
+                s = _pair_score(
+                    df, features[i], features[j], types[features[i]], types[features[j]]
+                )
+            except Exception:
+                s = float("nan")
             s = 0.0 if not np.isfinite(s) else float(s)
             mat[i, j] = mat[j, i] = s
     return pd.DataFrame(mat, index=features, columns=features)

@@ -63,7 +63,7 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 | `cramers_v_floor(min_levels)` | `float` — cardinality-dependent Cramér floor | §9.1 |
 | `tier_for(effective_n)` | `"full" \| "reduced-power" \| "structural-only"` | §10 |
 | `viability_floor_met(ttype, *, positives, effective_n)` | `bool` | §9 |
-| `per_fold_floor_met(positives, k, *, min_per_fold=10)` | `bool` | §9 |
+| `per_fold_floor_met(fold_positive_counts, *, min_per_fold=10)` | `bool` — **every** fold ≥ floor (real min, not average) | §9 |
 
 **`dispatch.py`** · `metric_for(feature_type, target_type) -> MetricSpec` — the §8 table as code. `MetricSpec(name, kind, fn, p_fn)`; `kind ∈ {"assoc","survival","derive"}`.
 
@@ -131,7 +131,7 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 
 **`values.py` (D)** · `sentinel_candidates(df) -> dict` · `null_sentinels(df, register) -> DataFrame` · `distribution(df, col) -> dict` · `missingness(df) -> Series` · `comissing_clusters(df, threshold=0.95) -> list` · `missingness_predicts_target(ctx, col) -> float` ⛨.
 
-**`partition.py` (E)** · `suggest_strategy(*, has_repeating_id, has_date) -> str` · `recommended_k(tier) -> int` · `make_folds(df, strategy, k=5, *, seed=42, target=None, group=None, date=None, run_dir=None) -> Folds` · `load_folds(run_dir) -> Folds`.
+**`partition.py` (E)** · `suggest_strategy(*, has_repeating_id, has_date) -> str` · `recommended_k(tier) -> int` · `make_folds(df, strategy, k=5, *, seed=42, target=None, group=None, date=None, run_dir=None) -> Folds` · `load_folds(run_dir) -> Folds` · `fold_positive_counts(folds, y, *, positive_label=None) -> list[int]` — positives in each fold's held-out block, for `per_fold_floor_met` (§9).
 
 **`relevance.py` (F)** · `derive_datetime(s, *, reference=None) -> DataFrame` (calendar + cyclical + recency) · `hurdle_split(count) -> (is_zero, positives)` · `relevance(ctx, feature, ftype, *, ci_b=200, shadow_b=50) -> dict` ⛨ · `relevance_all(ctx, features, *, n_jobs=1, ci_b=200, shadow_b=50) -> DataFrame` ⛨ (adds `q_value`; lower `ci_b`/`shadow_b`, or `ci_b=0`, for wide-data speed). See §4 for the `relevance` return shape.
 
@@ -164,7 +164,7 @@ Signatures show the call shape; `ctx` is a `RunContext`. `⛨` marks a leakage-g
 
 ### Setup (run once, outside the A→H loop)
 
-**`scaffold.py` / `cli.py`** · `scaffold(dest=".", *, overwrite=False) -> list[str]` and the **`fsp init`** CLI — drop the guide docs + the phase-code starter (**`analysis/screening.py`** runner + **`analysis/parts.py`**, one `run_<x>(ctx)` per part) into a new project, and **gitignore `runs/` + the (regenerable) docs** (see `README.md`). Fill `parts.py` **one part at a time** (§3.1); `python analysis/screening.py c` runs only Part C (resumes the checkpoint — no recompute), omit the letter for the whole chain. Code lives in `analysis/`, run outputs in `runs/<run-id>/`.
+**`scaffold.py` / `cli.py`** · `scaffold(dest=".", *, overwrite=False) -> list[str]` and the **`fsp init`** CLI — drop the guide docs + the phase-code starter (**`analysis/screening.py`** runner + **`analysis/parts.py`**, one `run_<x>(ctx)` per part) into a new project, and **gitignore `runs/` + the (regenerable) docs**. Fill `parts.py` **one part at a time** (§3.1); `python analysis/screening.py c` runs only Part C (resumes the checkpoint — no recompute), omit the letter for the whole chain. Code lives in `analysis/`, run outputs in `runs/<run-id>/`.
 
 ---
 

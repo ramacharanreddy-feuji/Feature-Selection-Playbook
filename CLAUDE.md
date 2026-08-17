@@ -31,4 +31,12 @@ Given a path to a dataset (CSV/parquet/Excel/SPSS·SAS·Stata) and — if the us
 - Write run outputs under `runs/<run-id>/` (gitignored).
 
 ## Environment
-Install the `fsp` package into your environment (see `README.md` for the one-line install). Run your analysis in the project's virtual environment (`uv run python`, a Jupyter kernel, …) and `import fsp`. Outputs land under `runs/<run-id>/` (gitignored).
+Install the `fsp` package into your environment **on Python 3.12** (`optbinning`→`ortools` has no 3.13 wheel):
+
+```sh
+uv init my-analysis --python 3.12 && cd my-analysis
+uv add "feature-selection-playbook @ git+ssh://git@github-feuji/ramacharanreddy-feuji/Feature-Selection-Playbook.git"
+uv run fsp init
+```
+
+Run your analysis in the project's virtual environment (`uv run python`, a Jupyter kernel, …) and `import fsp`. Outputs land under `runs/<run-id>/` (gitignored).

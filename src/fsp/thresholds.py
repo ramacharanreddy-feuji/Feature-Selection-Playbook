@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 # Auto-drop backstops (§9). Higher-is-better metrics: below → drop-eligible.
 # η²/ε²/point-biserial sit one tier below their §17.9–17.11 "small" bands so every
 # dispatch metric has a backstop (the shadow floor stays primary, §4.3).
@@ -66,8 +68,14 @@ def viability_floor_met(target_type: str, *, positives: int | None, effective_n:
 
 
 def per_fold_floor_met(
-    positives: int, k: int, *, min_per_fold: int = VIABILITY_MIN_PER_FOLD
+    fold_positive_counts: Iterable[int], *, min_per_fold: int = VIABILITY_MIN_PER_FOLD
 ) -> bool:
-    """§9 per-fold viability floor: ≥ `min_per_fold` positives in each of `k`
-    folds (checked once folds exist, Part E)."""
-    return k > 0 and positives / k >= min_per_fold
+    """§9 per-fold viability floor: **every** one of the k folds must hold at least
+    `min_per_fold` positives (checked once folds exist, Part E).
+
+    Pass the actual per-fold positive counts — e.g. from
+    `partition.fold_positive_counts(folds, y)`. This checks the real minimum across
+    folds, not `positives / k`: under a grouped or time-based split (§11 branches 1–2)
+    a single starved fold is caught rather than averaged away."""
+    counts = [int(c) for c in fold_positive_counts]
+    return bool(counts) and min(counts) >= min_per_fold

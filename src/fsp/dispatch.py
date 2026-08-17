@@ -52,7 +52,11 @@ def _p_spearman(x: ArrayLike, y: ArrayLike) -> float:
 
 
 def _abs_cliffs(x: ArrayLike, y: ArrayLike) -> float:
-    return abs(metrics.cliffs_delta(x, y))
+    # Only cell: binary feature `x` × ordinal target `y`. Cliff's δ measures the
+    # dominance of a quantity between two groups — here the ordinal target is the
+    # quantity and the binary feature is the grouping, so pass (target, feature).
+    # Feeding it (feature, target) makes the >2-level target the "group" → always nan.
+    return abs(metrics.cliffs_delta(y, x))
 
 
 def _abs_pbs(x: ArrayLike, y: ArrayLike) -> float:

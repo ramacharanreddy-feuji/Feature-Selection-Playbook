@@ -144,6 +144,16 @@ def test_dispatch_covers_the_table():
     assert spec.fn is not None
     assert spec.fn(np.array([1.0, 2, 3, 4]), np.array([0, 0, 1, 1])) == pytest.approx(1.0)
 
+    # regression: a binary feature × ordinal target must return a finite Cliff's δ,
+    # not nan — the fn is called (feature, target), and the ordinal target has >2
+    # levels, so the group/quantity args must be ordered correctly inside the wrapper.
+    cliffs = dispatch.metric_for("binary", "ordinal")
+    assert cliffs.name == "Cliff's δ" and cliffs.fn is not None
+    feat = np.array([0, 0, 0, 1, 1, 1] * 5, dtype=float)  # binary feature
+    tgt = np.array([0, 1, 0, 3, 4, 3] * 5)  # ordinal target, tracks the feature
+    eff = cliffs.fn(feat, tgt)
+    assert np.isfinite(eff) and eff > 0.5
+
 
 def test_thresholds_helpers():
     assert thresholds.tier_for(500) == "full"

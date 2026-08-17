@@ -139,7 +139,7 @@ For each part you **compute** the left column (call the `fsp` tools — see [`TO
 | **D** Value integrity | sentinel candidates, distributions, missingness, co-missing clusters | which sentinels are real; `engineer` flags | sentinel register; nulled sentinels | sentinels nulled; missingness mapped |
 | **E** Partition | grain + time presence | split strategy (§11) and k | frozen fold indices to disk | folds exist before any F statistic |
 | **F** Relevance + stability | per §8 dispatch, once the split is frozen: effect, CI, q-value, shape gap, fold spread, shadow floor | `keep`-eligible / `drop` / `review` per §9 | metrics + verdict per feature | every non-structural column has metrics + a decision |
-| **G** Redundancy | pairwise native metric; components at ≥ 0.95 | representative per component; `review` for 0.70–0.95 | `redundant_with` links | every kept feature is unique or a representative |
+| **G** Redundancy | pairwise native metric; components at ≥ 0.95 | representative per component; a **pair** in 0.70–0.95 → reviewer worklist (features keep their verdict) | `redundant_with` links | every kept feature is unique or a representative |
 | **H** Verdict | leak signals (§12); Boruta cross-check (§16) | adjudicate leaks; final verdict + reason for every column | final ledger; closing section | every column has exactly one verdict + a non-empty reason |
 
 ---
@@ -184,7 +184,7 @@ Each part follows the §3.1 loop. Below, per part: what to **compute**, what to 
 
 ### Part F — Relevance + stability  *(target — split frozen)*
 - **Purpose:** does each feature relate to the target, reliably?
-- **Compute (per feature, once the split is frozen — §4.4 edge 3):** the point estimate uses all available rows; the per-fold **test** effects give the stability spread, and genuinely out-of-fold scoring is used only where in-sample inflates (high-cardinality IV / target-encoding, §17.3). First derive any datetime feature into its parts and split any zero-inflated count into `is_zero` + positives (§8); then run the native test per feature type × target type (§8 dispatch), with:
+- **Compute (per feature, once the split is frozen — §4.4 edge 3):** the point estimate uses all available rows — it is **in-sample, not out-of-fold**. The frozen split gates *when* a per-feature target statistic may run (§4.4 edge 3) and supplies the per-fold **test** effects for the stability spread; it does **not** hold rows out of the point estimate. Genuinely out-of-fold scoring is used only where in-sample inflates (high-cardinality IV / target-encoding, §17.3), so write the notebook prose accordingly (don't claim an out-of-fold effect for the ordinary paths). First derive any datetime feature into its parts and split any zero-inflated count into `is_zero` + positives (§8); then run the native test per feature type × target type (§8 dispatch), with:
   - **Effect size** on the native scale, labeled with its metric name.
   - **Confidence interval** on the effect — the uniform bootstrap-percentile method (§17.12).
   - **q-value** — Benjamini-Hochberg FDR across all features (§17.6).
@@ -208,7 +208,7 @@ Each part follows the §3.1 loop. Below, per part: what to **compute**, what to 
   - categorical ↔ categorical → **Bergsma's Cramér's V** (§17.1); binary ↔ binary is its 2×2 case (|phi|)
   - ordinal involved → **|Spearman| / |Kendall τ|**
   VIF, if reported, is computed among the **kept numeric** features only.
-- **Decide & record:** within each connected component keep the deterministic representative (highest Part-F effect, ties broken by fewer missing, then name order). Others → `redundant`, with the representative recorded. Pairs in **0.70–0.95** → `review` (redundancy-review band), **not** collapsed. VIF > 10 → flag only, never drop (§9).
+- **Decide & record:** within each connected component keep the deterministic representative (highest Part-F effect, ties broken by fewer missing, then name order). Others → `redundant`, with the representative recorded. A **pair** whose similarity is in **0.70–0.95** goes on a reviewer worklist (a redundancy-review note on the *pair*) — **it is not collapsed, and neither feature is dropped or demoted**; both keep their Part-F verdict. The review band applies to pairs, never to features. VIF > 10 → flag only, never drop (§9).
 - **Gate `G`:** every kept feature is either unique or a representative; each `redundant` names its representative.
 
 ### Part H — Verdict  *(assemble)*
@@ -236,7 +236,7 @@ Each part follows the §3.1 loop. Below, per part: what to **compute**, what to 
 | **Nominal** | **IV / WoE** (optbinning) + **Cramér's V** (Bergsma) | **Cramér's V** (Bergsma) | Cramér's V + KW ε² | **Correlation ratio η²** / KW ε² | Cox w/ dummies / **log-rank** |
 | **Ordinal** | IV (monotone bins) + Cramér's V; Kendall τ *diagnostic only* | Cramér's V | **Spearman / Kendall τ** | Spearman | Cox (ordinal as numeric + as factor) |
 | **Binary** | **IV** / phi / Cramér's V (2×2) | Cramér's V | Cliff's δ / Mann–Whitney | **point-biserial** / Cliff's δ | Cox / log-rank |
-| **High-card categorical** | **cross-fold IV** (mean over folds) + Bergsma V | Bergsma V (bias-corrected) | cross-fold IV | cross-fold **target-encoded η²** (out-of-fold, §17.3) | Cox w/ cross-fold encoding |
+| **High-card categorical** | **cross-fold IV** (mean over folds) + Bergsma V | Bergsma V (bias-corrected) | **Bergsma V** (in-sample; OOF is binary/regression only — treat as upper bound) | cross-fold **target-encoded η²** (out-of-fold, §17.3) | Cox w/ cross-fold encoding |
 | **Datetime** | **Derive first** (see below), then route each derivative by its own type | ← | ← | ← | ← |
 
 **Datetime is never tested raw.** Derive (year, month, day-of-week, hour, is_weekend, days-since-epoch, cyclical sin/cos, recency-to-reference), then route each derivative through the table. Testing a raw epoch is meaningless. (This limited, mechanical derivation is the one exception to "no feature engineering," §16 — you still do not invent new business features.)
@@ -484,7 +484,7 @@ Permute the column (wiping the feature↔target relationship, preserving the mar
 Across the m features tested in F, sort p-values ascending p₍₁₎ ≤ … ≤ p₍ₘ₎. The q-value at rank k is
 **q₍ₖ₎ = min( 1, min_{j ≥ k} ( m · p₍ⱼ₎ / j ) )** — i.e. compute m·p₍ₖ₎/k, then enforce monotonicity from rank m down to 1. Report q per feature. Use it **with** (not instead of) effect size — significance without a clearing effect is still `review`, not `keep`. (`statsmodels.stats.multitest.multipletests(method="fdr_bh")`.)
 
-**Every F metric must supply a p-value so it can get a q.** Where the metric has an analytic test, use it: **AUC → Mann–Whitney U** (§17.13, the exact companion test); Spearman/Kendall/point-biserial/Kruskal–Wallis carry their own; Cox its own. Where it does not — **IV, η², Cramér's V, Cliff's δ** — use a **one-sided permutation p** off the shadow draws (§17.5): **p = (1 + #{shadow ≥ effect}) / (B + 1)**. This closes the gap that would otherwise leave the primary binary metrics (AUC, IV) without a q-value.
+**Every F metric must supply a p-value so it can get a q.** Where the metric has an analytic test, use it: **AUC → Mann–Whitney U** (§17.13, the exact companion test); Spearman/Kendall/point-biserial/Kruskal–Wallis carry their own; Cox its own. Where it does not — **IV, η², Cramér's V, Cliff's δ** — use a **one-sided permutation p** off the shadow draws (§17.5): **p = (1 + #{shadow ≥ effect}) / (B + 1)**. This closes the gap that would otherwise leave the primary binary metrics (AUC, IV) without a q-value. **Note the resolution floor:** a permutation p from B draws cannot go below 1/(B+1), so at the default `shadow_b = 50` every feature that clears its shadow floor shares an identical p ≈ 0.0196 and, after BH, a degenerate q ≈ 0.02 — do not read those tied q's as a ranking. Raise `shadow_b` (e.g. 200–1000) when you need q to separate the strong permutation-tested features; the analytic-p metrics (AUC, Spearman, …) are unaffected.
 
 ### 17.7 Population Stability Index (drift)
 PSI = Σ (%actual − %expected) · ln(%actual / %expected) across bins. < 0.10 stable · 0.10–0.25 moderate · **> 0.25 significant drift** → flag.

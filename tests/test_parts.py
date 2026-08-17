@@ -113,6 +113,27 @@ def test_redundancy_collapses_the_pair(data):
     assert rep == "signal"
 
 
+def test_pairwise_survives_string_ordinal(data):
+    # regression: a column typed `ordinal` (→ numeric → Spearman) but actually
+    # string-valued must score nan→0, not raise AttributeError three parts later.
+    d = data.copy()
+    d["contract"] = np.where(d["signal"] > d["signal"].median(), "yearly", "monthly")
+    types = {"signal": "continuous", "contract": "ordinal"}
+    pairs = redundancy.pairwise(d, list(types), types)  # must not raise
+    assert pairs.loc["signal", "signal"] == 1.0
+    assert np.isfinite(pairs.loc["signal", "contract"])  # 0.0 on the failed pair
+
+
+def test_fold_positive_counts_and_per_fold_floor(data):
+    # the real per-fold minimum is what the §9 floor checks
+    folds = partition.make_folds(data, "stratified", k=5, target="churn", run_dir=None)
+    counts = partition.fold_positive_counts(folds, data["churn"])
+    assert len(counts) == 5 and all(c >= 0 for c in counts)
+    minority = data["churn"].value_counts().index[-1]
+    assert sum(counts) == int((data["churn"] == minority).sum())  # every positive counted once
+    assert T.per_fold_floor_met(counts, min_per_fold=1) is (min(counts) >= 1)
+
+
 def test_leakage_detectors(data, tmp_path):
     ctx = fsp.open_run(data, target="churn", target_type="binary", runs_dir=tmp_path / "runs")
     leakage.name_signals(ctx)
@@ -238,8 +259,12 @@ def test_structural_flags_protects_target_and_date(data):
 def test_partition_and_viability_helpers():
     assert partition.recommended_k("reduced-power") == 3
     assert partition.recommended_k("full") == 5
-    assert T.per_fold_floor_met(60, 5) is True  # 12 per fold ≥ 10
-    assert T.per_fold_floor_met(30, 5) is False  # 6 per fold < 10
+    # per-fold floor checks the real minimum across folds, not an average:
+    assert T.per_fold_floor_met([12, 11, 13, 10, 14]) is True  # every fold ≥ 10
+    assert T.per_fold_floor_met([12, 11, 2, 13, 14]) is False  # one starved fold fails
+    assert T.per_fold_floor_met([]) is False  # no folds → not met
+    # the average-based old logic would have PASSED this (mean 10.4) — the min (2) fails
+    assert T.per_fold_floor_met([2, 18, 18, 18, 18]) is False
     assert partition.suggest_strategy(has_repeating_id=False, has_date=True) == "time"
     assert partition.suggest_strategy(has_repeating_id=True, has_date=False) == "grouped"
     assert partition.suggest_strategy(has_repeating_id=False, has_date=False) == "stratified"

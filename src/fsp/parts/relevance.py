@@ -89,12 +89,12 @@ def relevance(
     target = ctx.config.target
     ttype = ctx.config.target_type or "binary"
     if feature_type == "high_card" and ttype in {"binary", "regression"}:
-        return _high_card_oof(ctx, feature, ttype)
+        return _high_card_oof(ctx, feature, ttype, shadow_b=shadow_b)
     spec = metric_for(feature_type, ttype)
     if spec.kind == "derive":
         return {"column": feature, "metric_name": "derive-first", "kind": "derive"}
     if spec.kind == "survival":
-        return _survival(ctx, feature)
+        return _survival(ctx, feature, shadow_b=shadow_b)
 
     assert spec.fn is not None and target is not None
     fn = spec.fn
@@ -141,10 +141,19 @@ def relevance(
     }
 
 
-def _high_card_oof(ctx: RunContext, feature: str, ttype: str) -> dict[str, Any]:
+def _high_card_oof(
+    ctx: RunContext, feature: str, ttype: str, *, shadow_b: int = 50
+) -> dict[str, Any]:
     """High-cardinality relevance via out-of-fold encoding (§8, §17.3) — the
     in-sample IV/η² would be inflated, so score it on held-out folds only. The
-    shadow floor permutes the column and re-runs the same out-of-fold metric."""
+    shadow floor permutes the column and re-runs the same out-of-fold metric.
+
+    Only binary and regression targets get this leakage-safe encoding; a
+    high-cardinality categorical against a multiclass/ordinal target is *not* routed
+    here (see `relevance`) and falls through to in-sample Cramér's V, which inflates
+    — treat those effects as an upper bound. `shadow_b` sets the permutation count;
+    at small B the permutation q-value floors at 1/(shadow_b+1) (§17.6), so keep it
+    ≥ 50 for a usable q."""
     target = ctx.config.target
     assert target is not None and ctx.folds is not None
     splits = ctx.folds.splits
@@ -169,7 +178,7 @@ def _high_card_oof(ctx: RunContext, feature: str, ttype: str) -> dict[str, Any]:
 
     effect = float(score(x))
     rng = np.random.default_rng(ctx.config.seed)
-    shadow = np.array([score(rng.permutation(x)) for _ in range(50)])
+    shadow = np.array([score(rng.permutation(x)) for _ in range(shadow_b)])
     floor = float(np.nanpercentile(shadow, SHADOW_PCT)) if len(shadow) else float("nan")
     pairwise_n = int((ctx.df[feature].notna() & ctx.df[target].notna()).sum())
     return {
@@ -185,7 +194,7 @@ def _high_card_oof(ctx: RunContext, feature: str, ttype: str) -> dict[str, Any]:
     }
 
 
-def _survival(ctx: RunContext, feature: str) -> dict[str, Any]:
+def _survival(ctx: RunContext, feature: str, *, shadow_b: int = 50) -> dict[str, Any]:
     target, event_col = ctx.config.target, ctx.config.event_col
     assert target is not None and event_col is not None
     rows = _screening_rows(ctx)
@@ -203,7 +212,7 @@ def _survival(ctx: RunContext, feature: str) -> dict[str, Any]:
             "p": float("nan"),
         }
     rng = np.random.default_rng(ctx.config.seed)
-    shadow = [metrics.concordance(dur, rng.permutation(x), ev) for _ in range(50)]
+    shadow = [metrics.concordance(dur, rng.permutation(x), ev) for _ in range(shadow_b)]
     floor = float(np.nanpercentile([max(s, 1 - s) for s in shadow], SHADOW_PCT))
     pairwise_n = int((ctx.df[feature].notna() & ctx.df[event_col].notna()).sum())
     return {

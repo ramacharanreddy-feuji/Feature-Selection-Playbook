@@ -10,7 +10,7 @@ from numpy.typing import ArrayLike
 from optbinning import OptimalBinning
 from scipy.stats import chi2_contingency
 
-from ._util import clean_pair
+from ._util import as_binary01, clean_pair
 
 Splits = Iterable[tuple[np.ndarray, np.ndarray]]
 
@@ -43,9 +43,13 @@ def bergsma_v(a: ArrayLike, b: ArrayLike) -> float:
 
 
 def information_value(x: ArrayLike, y: ArrayLike, dtype: str = "numerical") -> float:
-    """IV via optbinning (§17.3). `dtype` is "numerical" or "categorical"."""
+    """IV via optbinning (§17.3). `dtype` is "numerical" or "categorical".
+
+    The target is coerced to 0/1 (`as_binary01`), so a string target (`Yes`/`No`)
+    scores like any numeric feature instead of raising an opaque optbinning error;
+    a non-binary target fails with a typed message naming the class count."""
     xa, ya = clean_pair(x, y)
-    ob = OptimalBinning(dtype=dtype).fit(xa, ya)
+    ob = OptimalBinning(dtype=dtype).fit(xa, as_binary01(ya))
     ob.binning_table.build()
     return float(ob.binning_table.iv)
 
@@ -53,7 +57,7 @@ def information_value(x: ArrayLike, y: ArrayLike, dtype: str = "numerical") -> f
 def woe_table(x: ArrayLike, y: ArrayLike, dtype: str = "numerical") -> pd.DataFrame:
     """The optbinning binning table (bins, WoE, IV contribution) for reporting."""
     xa, ya = clean_pair(x, y)
-    ob = OptimalBinning(dtype=dtype).fit(xa, ya)
+    ob = OptimalBinning(dtype=dtype).fit(xa, as_binary01(ya))
     return ob.binning_table.build()
 
 

@@ -95,6 +95,22 @@ def test_information_value_strong_separator(rng):
     assert m.information_value(x, y) > 0.5
 
 
+def test_information_value_accepts_string_target(rng):
+    # regression: a Yes/No target must score like a 0/1 one, not raise an opaque
+    # optbinning TypeError. IV magnitude is invariant to the class→code mapping.
+    x = np.r_[rng.normal(0, 1, 300), rng.normal(4, 1, 300)]
+    y01 = np.r_[np.zeros(300), np.ones(300)].astype(int)
+    ystr = np.where(y01 == 1, "Yes", "No")
+    assert m.information_value(x, ystr) == pytest.approx(m.information_value(x, y01), rel=1e-9)
+
+
+def test_information_value_rejects_nonbinary_target(rng):
+    x = rng.normal(0, 1, 300)
+    y3 = rng.integers(0, 3, 300)  # three classes → typed error, not a crash downstream
+    with pytest.raises(ValueError, match="binary"):
+        m.information_value(x, y3)
+
+
 def test_woe_table_returns_binning_frame(rng):
     y = np.r_[np.zeros(200), np.ones(200)].astype(int)
     x = np.r_[rng.normal(0, 1, 200), rng.normal(3, 1, 200)]
